@@ -66,6 +66,13 @@ with free accounts). Pairing happens through usbmuxd on first connect.
 - `install-toolchain.sh`: everything up to and including the SDK install.
 - `device-run.sh`: pair, install, launch, LLDB attach, with the phone connected.
 
+## Findings
+
+[FINDINGS.md](FINDINGS.md) records the fourteen things that broke on the way to the
+first working run, with error text, root cause, and fix for each: SDK install
+failures, a clang version mismatch that breaks SwiftUI, and the four unstated
+prerequisites for debugging on iOS 17 and later.
+
 ## Notes
 
 - `clang` on PATH must be the Swift toolchain's own clang, not the system
