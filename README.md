@@ -5,9 +5,9 @@ the t2linux kernel), installed on a physical iPhone over USB, with no Xcode and
 no macOS in the loop.
 
 This branch (`intel`) adds x86_64 support. Toolchain install, SDK install from
-`Xcode.xip`, and an arm64 SwiftUI build are verified on a 2019 Intel MacBook
-Pro (see the Intel section below); the device deploy has been verified on
-aarch64 only so far.
+`Xcode.xip`, an arm64 SwiftUI build, and the device deploy are verified on a
+2019 Intel MacBook Pro with an iPhone 15 Pro Max on iOS 26.6.1 (see the Intel
+section below). LLDB attach is verified on aarch64 only so far.
 
 Based on a first successful run on 2026-09-09 with:
 
@@ -113,6 +113,8 @@ What differs from the Apple Silicon setup, checked on a 2019 MacBook Pro
   fresh Omarchy x86_64 install has clang 22.1.8 on PATH while the Swift 6.3.3
   toolchain's clang is 21.x.
 - usbmuxd is not installed by default; `install-toolchain.sh` step 1 covers it.
+- Timings on an i7-9750H: cold SwiftUI build 94 s, warm `xtool dev run` to the
+  phone 7 s.
 
 ## License
 

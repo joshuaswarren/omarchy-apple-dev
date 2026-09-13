@@ -163,7 +163,14 @@ headers and `ld64.lld`; `swift sdk list` prints `darwin`. `xtool dev build` on
 the stock template then produced a `Mach-O 64-bit arm64 executable` in 94 s
 cold on the i7-9750H, no warnings.
 
-Not yet verified on Intel: the device deploy and LLDB attach. The steps are host-arch independent on paper (everything past
+**22. Device deploy works from x86_64.** With the phone paired and `xtool auth`
+done, `xtool dev run` on the template app took 7 s warm: unpack, prepare
+device, provision, sign, package, connect, install, verify, exit 0. The
+installed bundle id is `XTL-<TEAMID>.com.example.HelloOmarchy` (free-account
+signing prefixes the Team ID), so `pymobiledevice3 apps list` will not find it
+under the id in `xtool.yml`. Target: iPhone 15 Pro Max (iPhone16,2), iOS 26.6.1.
+
+Not yet verified on Intel: LLDB attach (FINDINGS #10-14). The steps are host-arch independent on paper (everything past
 the toolchain download targets arm64 iOS), so the aarch64 sequence above is the
 one to follow.
 
