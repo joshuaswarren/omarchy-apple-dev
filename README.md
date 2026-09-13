@@ -37,14 +37,18 @@ Works with a free Apple ID. Paid membership not required for device installs.
 
 ## Install
 
-Run `install-toolchain.sh`, then get an SDK onto the machine:
+Get an SDK source onto the machine first, then run `install-toolchain.sh`.
+The script is the same on Apple Silicon and Intel; it picks the Swift package
+and xtool AppImage for the host arch and installs the SDK from whichever
+source it finds:
 
 - Directory route: stream only the pieces xtool needs from a Mac with Xcode
-  (see `install-toolchain.sh`, section 5) into `~/xcode-apple-sdk-src/Xcode.app`,
-  then `xtool sdk install ~/xcode-apple-sdk-src/Xcode.app`.
-- XIP route: download `Xcode.xip` from
-  https://developer.apple.com/download/all/?q=Xcode and run
-  `xtool sdk install /path/to/Xcode.xip`.
+  (see `install-toolchain.sh`, section 5) into `~/xcode-apple-sdk-src/Xcode.app`.
+- XIP route (no second Mac needed): download `Xcode_*.xip` from
+  https://developer.apple.com/download/all/?q=Xcode into `~/Downloads/`.
+
+If neither is present the script stops after the toolchain and prints the
+`xtool sdk install` command to run once you have one.
 
 Verify with `swift sdk list` (should print `darwin`).
 
@@ -90,9 +94,8 @@ prerequisites for debugging on iOS 17 and later.
   version mismatch between host clang and the Swift compiler produces
   `__builtin_bit_cast` size errors when compiling SwiftUI. Use
   `PATH=/usr/lib/swift/bin:$PATH` on Arch-based installs.
-- Building SwiftUI pulls in simd/arm_neon headers; first build takes about a
-  minute on an M1. These are target (arm64) headers, so they are pulled in on
-  an Intel host as well.
+- Building SwiftUI pulls in simd/arm_neon headers (target headers, so on any
+  host). First build: about a minute on an M1, about 95 s on an i7-9750H.
 
 ## Intel (x86_64) Macs
 
@@ -114,7 +117,7 @@ What differs from the Apple Silicon setup, checked on a 2019 MacBook Pro
   toolchain's clang is 21.x.
 - usbmuxd is not installed by default; `install-toolchain.sh` step 1 covers it.
 - Timings on an i7-9750H: cold SwiftUI build 94 s, warm `xtool dev run` to the
-  phone 7 s.
+  phone 7 s (11 s on the M1).
 
 ## License
 

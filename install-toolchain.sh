@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Install the iOS-on-Linux toolchain on Omarchy (Arch, aarch64 or x86_64).
-# Verified 2026-09-09 on an M1 (aarch64): swift 6.3.3, xtool 1.19.0, lldb 21.0.0,
-# pymobiledevice3. Intel (x86_64) support: AUR swift-bin has an x86_64 source and
-# xtool publishes an x86_64 AppImage; both resolve automatically below.
+# Verified 2026-09-09 on an M1 (aarch64) and 2026-09-13 on a T2 Intel MacBook Pro
+# (x86_64): swift 6.3.3, xtool 1.19.x, lldb 21.0.0, pymobiledevice3. Every
+# arch-specific choice (swift-bin tarball, xtool AppImage) keys off uname -m.
 # Installs into user paths plus normal pacman/AUR packages. No system reinstalls.
 set -euo pipefail
 
@@ -69,14 +69,27 @@ echo "-- Route B: Xcode.xip from developer.apple.com --"
 # required), then point xtool sdk install at the .xip path directly.
 
 echo "== 6. Darwin SDK registration =="
+# xtool's file copy preserves ownership (swift-corelibs FileManager.copyItem
+# calls lchown), which is EPERM for a normal user on the root-owned swift-bin
+# tree. Take ownership of it first. Needed on aarch64 and x86_64 alike.
+sudo chown -R "$USER" /usr/lib/swift
 # IMPORTANT: the Swift toolchain's own clang must come first in PATH.
 # A system clang of a different version causes __builtin_bit_cast size errors
 # when compiling SwiftUI against the SDK.
 export PATH="$SWIFT_BIN_DIR:$PATH"
-# Route A:
-"$HOME/.local/bin/xtool" sdk install "$SDK_SRC/Xcode.app" || true
-# Route B (comment the line above, uncomment this one):
-# "$HOME/.local/bin/xtool" sdk install "$HOME/Downloads/Xcode.xip"
+# Pick whichever SDK source is present: Route A directory, else the newest
+# Xcode*.xip in ~/Downloads, else stop here with instructions.
+XIP=$(ls -t "$HOME"/Downloads/Xcode*.xip 2>/dev/null | head -n1 || true)
+if [ -d "$SDK_SRC/Xcode.app" ]; then
+  "$HOME/.local/bin/xtool" sdk install "$SDK_SRC/Xcode.app"
+elif [ -n "$XIP" ]; then
+  "$HOME/.local/bin/xtool" sdk install "$XIP"
+else
+  echo "No SDK source found. Either stream Xcode.app into $SDK_SRC (Route A) or"
+  echo "download Xcode.xip into ~/Downloads (Route B), then run:"
+  echo "  PATH=$SWIFT_BIN_DIR:\$PATH $HOME/.local/bin/xtool sdk install <Xcode.app or Xcode.xip>"
+  exit 0
+fi
 
 swift sdk list   # must print: darwin
 
