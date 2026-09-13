@@ -37,7 +37,7 @@ chmod +x "$HOME/.local/bin/xtool"
 echo "== 4. pymobiledevice3 in a venv =="
 python3 -m venv "$VENV"
 "$VENV/bin/pip" install pymobiledevice3
-"$VENV/bin/pymobiledevice3" --version
+"$VENV/bin/pymobiledevice3" version   # 11.x has no --version flag
 
 echo "== 5. iOS SDK =="
 # xtool sdk install accepts an Xcode.xip OR an extracted Xcode.app directory.

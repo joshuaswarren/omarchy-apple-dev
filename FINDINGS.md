@@ -137,6 +137,17 @@ removes the `usbutils` dependency.
 toolchain's clang is 21.x. Keep `PATH=/usr/lib/swift/bin:$PATH` for the SDK
 install and every build.
 
+**19. `pymobiledevice3 --version` exits 2 on current releases.** pymobiledevice3
+11.12.4 (PyPI on 2026-09-13) only has `--verbose` at the top level; the version
+is a subcommand, `pymobiledevice3 version`. With `set -e` this ended
+`install-toolchain.sh` at the end of step 4, after everything had installed.
+Not Intel-specific; it is version drift since the 2026-09-09 run.
+
+Verified on this Intel host by running `install-toolchain.sh`: usbmuxd 1.1.1,
+swift-bin 6.3.3 (`x86_64-unknown-linux-gnu`, clang 21.0.0), python39 3.9.25 (a
+source build, several minutes), xtool 1.19.2 x86_64, pymobiledevice3 11.12.4,
+and LLDB 21.0.0 starts.
+
 Not yet verified on Intel: the SDK install, a SwiftUI build, the device deploy,
 and LLDB attach. The steps are host-arch independent on paper (everything past
 the toolchain download targets arm64 iOS), so the aarch64 sequence above is the
