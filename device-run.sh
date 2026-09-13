@@ -10,7 +10,21 @@ PMD3="$HOME/pymobile3-venv/bin/pymobiledevice3"
 
 echo "== 1. Device visible over USB? =="
 # usbmuxd is started by udev when a device is plugged in. Nothing to enable.
-lsusb | grep -i apple || echo "WARNING: no Apple USB device found by lsusb."
+# Do not grep lsusb for "apple": on a T2 Intel Mac the T2 controller, FaceTime
+# camera, keyboard and Touch Bar all enumerate as Apple USB devices, so that
+# check passes with no phone attached. Match the iOS device product IDs
+# instead, straight from sysfs (works without usbutils installed).
+#   05ac:12a8 iPhone   05ac:12ab iPad
+found=0
+for d in /sys/bus/usb/devices/*; do
+  [ -f "$d/idVendor" ] || continue
+  if [ "$(cat "$d/idVendor")" = 05ac ]; then
+    case "$(cat "$d/idProduct")" in
+      12a8|12ab) echo "Found: $(cat "$d/product" 2>/dev/null || echo iOS device) ($(cat "$d/idVendor"):$(cat "$d/idProduct"))"; found=1 ;;
+    esac
+  fi
+done
+[ "$found" = 1 ] || echo "WARNING: no iPhone/iPad found on USB (05ac:12a8 or 05ac:12ab)."
 
 echo "== 2. Trust and pair =="
 # The phone shows a 'Trust This Computer' prompt on first connect. Accept it.

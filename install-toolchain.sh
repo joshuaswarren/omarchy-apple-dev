@@ -1,8 +1,16 @@
 #!/usr/bin/env bash
-# Install the iOS-on-Linux toolchain on Omarchy (Arch, aarch64).
-# Verified 2026-09-09: swift 6.3.3, xtool 1.19.0, lldb 21.0.0, pymobiledevice3.
+# Install the iOS-on-Linux toolchain on Omarchy (Arch, aarch64 or x86_64).
+# Verified 2026-09-09 on an M1 (aarch64): swift 6.3.3, xtool 1.19.0, lldb 21.0.0,
+# pymobiledevice3. Intel (x86_64) support: AUR swift-bin has an x86_64 source and
+# xtool publishes an x86_64 AppImage; both resolve automatically below.
 # Installs into user paths plus normal pacman/AUR packages. No system reinstalls.
 set -euo pipefail
+
+case "$(uname -m)" in
+  aarch64|x86_64) ;;
+  *) echo "Unsupported host arch: $(uname -m) (need aarch64 or x86_64)"; exit 1 ;;
+esac
+echo "Host: $(uname -m). Apps are cross-compiled to arm64 iOS regardless of host."
 
 SWIFT_BIN_DIR=/usr/lib/swift/bin
 VENV="$HOME/pymobile3-venv"
@@ -13,11 +21,13 @@ sudo pacman -S --needed --noconfirm usbmuxd
 # usbmuxd.service is static on Arch: it is triggered by udev, do not enable it.
 
 echo "== 2. Swift 6.3 toolchain (AUR binary package, includes lldb and clang) =="
+# swift-bin has arch=('x86_64' 'aarch64') and picks the matching swift.org
+# ubi9 tarball for the host, so this line is the same on Intel and Apple Silicon.
 yay -S --needed --noconfirm swift-bin
 # lldb needs libpython3.9: the package lists python39 as an optional dep.
 sudo pacman -S --needed --noconfirm --asdeps python39 || yay -S --noconfirm python39
 
-echo "== 3. xtool AppImage =="
+echo "== 3. xtool AppImage (xtool-x86_64 or xtool-aarch64, picked by uname -m) =="
 mkdir -p "$HOME/.local/bin"
 curl -fL "https://github.com/xtool-org/xtool/releases/latest/download/xtool-$(uname -m).AppImage" \
   -o "$HOME/.local/bin/xtool"

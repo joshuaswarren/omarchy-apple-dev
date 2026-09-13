@@ -1,13 +1,18 @@
-# Build and deploy iOS apps on Omarchy Linux (Apple Silicon)
+# Build and deploy iOS apps on Omarchy Linux (Apple Silicon and Intel)
 
-SwiftUI apps built on an M1 Mac running Omarchy Linux, installed on a physical
-iPhone over USB, with no Xcode and no macOS in the loop.
+SwiftUI apps built on a Mac running Omarchy Linux (M1, or an Intel/T2 Mac on
+the t2linux kernel), installed on a physical iPhone over USB, with no Xcode and
+no macOS in the loop.
+
+This branch (`intel`) adds x86_64 support. The toolchain pieces all exist for
+x86_64 (see the Intel section below); the end-to-end device run has been
+verified on aarch64 only so far.
 
 Based on a first successful run on 2026-09-09 with:
 
 | Tool | Version | Source |
 |------|---------|--------|
-| Swift | 6.3.3 (aarch64-unknown-linux-gnu) | AUR `swift-bin` |
+| Swift | 6.3.3 (aarch64- or x86_64-unknown-linux-gnu) | AUR `swift-bin` |
 | xtool | 1.19.0 | xtool-org/xtool AppImage |
 | pymobiledevice3 | latest from PyPI at install time | venv |
 | LLDB | 21.0.0 (Swift toolchain) | bundled with `swift-bin` |
@@ -17,7 +22,9 @@ Works with a free Apple ID. Paid membership not required for device installs.
 
 ## What you need
 
-- An Apple Silicon Mac or Linux box running Omarchy (Arch-based), aarch64.
+- A Mac or Linux box running Omarchy (Arch-based), aarch64 or x86_64. Intel
+  Macs with a T2 chip need the t2linux kernel (`uname -r` ends in `-t2`); the
+  Omarchy T2 install already provides it.
 - An iOS device and a USB cable.
 - One of:
   - A Mac with Xcode installed (any host on your network that you can SSH
@@ -48,7 +55,9 @@ cd HelloOmarchy
 xtool dev run
 ```
 
-`xtool dev build` alone produces `xtool/HelloOmarchy.app` (arm64 Mach-O).
+`xtool dev build` alone produces `xtool/HelloOmarchy.app` (arm64 Mach-O). The
+output is arm64 on an Intel host too: the SDK cross-compiles for the phone, the
+host arch only decides which Swift and xtool binaries you run.
 
 ## Device
 
@@ -81,7 +90,28 @@ prerequisites for debugging on iOS 17 and later.
   `__builtin_bit_cast` size errors when compiling SwiftUI. Use
   `PATH=/usr/lib/swift/bin:$PATH` on Arch-based installs.
 - Building SwiftUI pulls in simd/arm_neon headers; first build takes about a
-  minute on an M1.
+  minute on an M1. These are target (arm64) headers, so they are pulled in on
+  an Intel host as well.
+
+## Intel (x86_64) Macs
+
+What differs from the Apple Silicon setup, checked on a 2019 MacBook Pro
+(i7-9750H, T2, Omarchy on the t2linux kernel):
+
+- `swift-bin` declares `arch=('x86_64' 'aarch64')` and fetches the
+  swift.org ubi9 x86_64 tarball; nothing to change.
+- xtool publishes `xtool-x86_64.AppImage`; `install-toolchain.sh` picks it
+  via `uname -m`. xtool 1.19.2 x86_64 starts on Omarchy with only `fuse3`
+  installed, no `fuse2` needed.
+- `lsusb | grep -i apple` is not a usable "is the phone plugged in" test on
+  a T2 Mac: the T2 controller, FaceTime camera, internal keyboard and Touch Bar
+  all show as Apple USB devices. `device-run.sh` now matches the iPhone/iPad
+  product IDs (`05ac:12a8`, `05ac:12ab`) from sysfs instead, and does not
+  need `usbutils`.
+- The host clang mismatch (Notes above, FINDINGS #5) applies unchanged: a
+  fresh Omarchy x86_64 install has clang 22.1.8 on PATH while the Swift 6.3.3
+  toolchain's clang is 21.x.
+- usbmuxd is not installed by default; `install-toolchain.sh` step 1 covers it.
 
 ## License
 

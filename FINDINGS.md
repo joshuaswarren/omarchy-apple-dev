@@ -114,6 +114,34 @@ PATH=/usr/lib/swift/bin:$PATH pymobiledevice3 developer debugserver lldb \
   <bundle-id> --rsd <address> <port>
 ```
 
+## Intel (x86_64) addendum
+
+Checked on 2026-09-13 on a 2019 16" MacBook Pro (i7-9750H, 32 GB, T2) running
+Omarchy on the t2linux kernel, before an end-to-end device run on this host.
+
+**15. The toolchain exists for x86_64.** AUR `swift-bin` 6.3.3 has
+`source_x86_64` pointing at the swift.org ubi9 tarball, and xtool 1.19.2 ships
+`xtool-x86_64.AppImage`. `install-toolchain.sh` resolves both from `uname -m`.
+
+**16. The xtool AppImage does not need `fuse2`.** A fresh Omarchy install has
+only `fuse3`; `xtool --version` runs fine with it, so no extra package.
+
+**17. `lsusb | grep -i apple` always succeeds on a T2 Mac.** With no phone
+attached, sysfs still lists `05ac:8233 Apple T2 Controller`, `05ac:8514 FaceTime
+HD Camera`, `05ac:0340 Apple Internal Keyboard / Trackpad`, `05ac:8302 Touch Bar
+Display` and more. Fix: match the iOS product IDs `05ac:12a8` (iPhone) and
+`05ac:12ab` (iPad) instead. `device-run.sh` does this from sysfs, which also
+removes the `usbutils` dependency.
+
+**18. Same clang gap as #5.** Omarchy x86_64 ships clang 22.1.8; the Swift
+toolchain's clang is 21.x. Keep `PATH=/usr/lib/swift/bin:$PATH` for the SDK
+install and every build.
+
+Not yet verified on Intel: the SDK install, a SwiftUI build, the device deploy,
+and LLDB attach. The steps are host-arch independent on paper (everything past
+the toolchain download targets arm64 iOS), so the aarch64 sequence above is the
+one to follow.
+
 ## Still open
 
 A source-level breakpoint in app code, hit on a tap. The attach above proves the
