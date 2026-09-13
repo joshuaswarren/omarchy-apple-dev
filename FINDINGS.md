@@ -148,8 +148,22 @@ swift-bin 6.3.3 (`x86_64-unknown-linux-gnu`, clang 21.0.0), python39 3.9.25 (a
 source build, several minutes), xtool 1.19.2 x86_64, pymobiledevice3 11.12.4,
 and LLDB 21.0.0 starts.
 
-Not yet verified on Intel: the SDK install, a SwiftUI build, the device deploy,
-and LLDB attach. The steps are host-arch independent on paper (everything past
+**20. `xtool new` crashes when stdin is not a terminal or pipe.** Without
+`--skip-setup` it runs `xtool setup`, which is interactive; under a non-TTY
+stdin (e.g. `< /dev/null`) SwiftNIO dies with `epoll_ctl(...): Operation not
+permitted`. Pass `--skip-setup` when the SDK is already installed and auth
+will be done separately, or run it from a real terminal.
+
+**21. SDK install and SwiftUI build work on x86_64.** `xtool sdk install
+~/Downloads/Xcode_26.6_Universal.xip` (2.97 GB xip, Route B) ran clean after
+`sudo chown -R "$USER" /usr/lib/swift` (#4) with `PATH=/usr/lib/swift/bin:$PATH`
+(#5): toolset download, xip extraction, SDK copy, metadata. The bundle lands in
+`~/.config/swiftpm/swift-sdks/darwin.artifactbundle` (3.1 GB) with clang 21
+headers and `ld64.lld`; `swift sdk list` prints `darwin`. `xtool dev build` on
+the stock template then produced a `Mach-O 64-bit arm64 executable` in 94 s
+cold on the i7-9750H, no warnings.
+
+Not yet verified on Intel: the device deploy and LLDB attach. The steps are host-arch independent on paper (everything past
 the toolchain download targets arm64 iOS), so the aarch64 sequence above is the
 one to follow.
 
