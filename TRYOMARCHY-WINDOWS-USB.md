@@ -17,11 +17,14 @@ There are two separate issues:
    `lsusb`, but it does not provide a connection that `usbmuxd` can reliably use.
    The working transport is `usbipd-win` on the Windows host plus `usbip` in the
    Omarchy guest.
-2. **Large app transfers:** The stock `usbmuxd` can submit a 65,536-byte mux
-   transfer through that USB/IP connection. The device path accepts at most
-   65,535 bytes, so larger installs can stop after connecting even though small
-   apps work. A small `usbmuxd` patch caps the relevant transfer and buffer sizes
-   at 65,535 bytes.
+2. **Large app transfers:** Small apps can install over USB/IP while larger
+   installs stop after connecting. In the observed failure, `usbmuxd` received a
+   device-side error reporting a 65,536-byte message against a 65,535-byte
+   maximum. The same behavior has been reported to both
+   [usbmuxd](https://github.com/libimobiledevice/usbmuxd/issues/247) and
+   [usbipd-win](https://github.com/dorssel/usbipd-win/issues/959). Its exact
+   origin remains unresolved; the workaround used here aligns `usbmuxd`'s mux
+   and connection-buffer limits at 65,535 bytes.
 
 Both parts are required for a complete setup.
 
@@ -76,12 +79,22 @@ whether to trust the computer.
 
 ## 3. Install the USB/IP-safe usbmuxd
 
-This repository includes a patch for `usbmuxd` 1.1.1. From the root of this
-repository, install the build dependencies, build the patched daemon, and place
-it alongside the distro-owned binary:
+This repository includes two patches for `usbmuxd` 1.1.1:
+
+- [Arch Linux's `libplist` compatibility patch](https://gitlab.archlinux.org/archlinux/packaging/packages/usbmuxd/-/blob/main/libplist-2.3.0.diff),
+  required to compile 1.1.1 against the current `libplist` API
+- the USB/IP transfer workaround described above
+
+The transfer patch reduces the 65,536-byte `DEV_MRU` and `CONN_OUTBUF_SIZE`
+limits by one byte and sets `USB_MTU` to the same ceiling. Upstream 1.1.1's
+default `USB_MTU` is 49,152 bytes, so this is not simply an MTU reduction; it is
+the configuration used to avoid the observed 65,536-byte failure.
+
+From the root of this repository, install the build dependencies, apply both
+patches, build the daemon, and place it alongside the distro-owned binary:
 
 ```bash
-sudo pacman -S --needed base-devel git libimobiledevice-glue libplist libusb
+sudo pacman -S --needed base-devel git libimobiledevice libplist libusb
 
 omarchy_apple_dev_dir="$PWD"
 usbmuxd_build_dir="$(mktemp -d)"
@@ -91,6 +104,7 @@ git clone --branch 1.1.1 --depth 1 \
   "$usbmuxd_build_dir/usbmuxd"
 
 cd "$usbmuxd_build_dir/usbmuxd"
+patch -p1 < "$omarchy_apple_dev_dir/patches/usbmuxd-libplist-2.3.0.patch"
 patch -p1 < "$omarchy_apple_dev_dir/patches/usbmuxd-usbipd-safe.patch"
 
 NOCONFIGURE=1 ./autogen.sh
