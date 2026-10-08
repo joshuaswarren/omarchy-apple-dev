@@ -43,7 +43,9 @@ esac
 repo=$(dirname "$(readlink -f "$0")")
 PATH="$(dirname "$(readlink -f "$(command -v swift)")"):$HOME/.local/bin:$PATH"
 ulimit -n 65536 2>/dev/null || true
-sdk="$HOME/.swiftpm/swift-sdks/darwin.artifactbundle"
+# SwiftPM keeps Swift SDKs under $XDG_CONFIG_HOME/swiftpm when that is set, else ~/.swiftpm.
+sdk="${XDG_CONFIG_HOME:+$XDG_CONFIG_HOME/swiftpm}"
+sdk="${sdk:-$HOME/.swiftpm}/swift-sdks/darwin.artifactbundle"
 idir="${DEVELOPER_ID_DIR:-$HOME/.config/omarchy-apple-dev/developer-id}"
 product="${PRODUCT:-$(swift package describe --type json | python3 -c '
 import json, sys

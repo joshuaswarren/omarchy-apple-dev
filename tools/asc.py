@@ -36,7 +36,10 @@ API = "https://api.appstoreconnect.apple.com"
 IDENTITY_DIR = Path(os.environ.get("ASC_IDENTITY_DIR", Path.home() / ".config/omarchy-apple-dev/distribution"))
 TEST_IDENTITY_DIR = Path.home() / ".config/omarchy-apple-dev/test-identity"
 TEST_TEAM = "TEST000000"
-SDK = Path(os.environ.get("DARWIN_SDK", Path.home() / ".swiftpm/swift-sdks/darwin.artifactbundle"))
+# SwiftPM keeps Swift SDKs under $XDG_CONFIG_HOME/swiftpm when that is set, else ~/.swiftpm.
+SWIFTPM_DIR = (Path(os.environ["XDG_CONFIG_HOME"], "swiftpm") if os.environ.get("XDG_CONFIG_HOME")
+               else Path.home() / ".swiftpm")
+SDK = Path(os.environ.get("DARWIN_SDK", SWIFTPM_DIR / "swift-sdks/darwin.artifactbundle"))
 XCODE_VERSION_PLISTS = sorted(Path.home().glob(".cache/xtool/darwin-*.xtoolsdk.version.plist"))
 APP_GROUPS = [g for g in os.environ.get("APP_GROUPS", "").split(",") if g]
 

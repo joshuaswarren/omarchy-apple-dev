@@ -36,7 +36,10 @@ sdk_install_from() {
 }
 
 REPO_DIR=$(dirname "$(readlink -f "$0")")
-DARWIN_SDK_BUNDLE="$HOME/.swiftpm/swift-sdks/darwin.artifactbundle"
+# SwiftPM keeps Swift SDKs under $XDG_CONFIG_HOME/swiftpm when XDG_CONFIG_HOME is
+# set (it is in an Omarchy desktop terminal), else under ~/.swiftpm.
+DARWIN_SDK_BUNDLE="${XDG_CONFIG_HOME:+$XDG_CONFIG_HOME/swiftpm}"
+DARWIN_SDK_BUNDLE="${DARWIN_SDK_BUNDLE:-$HOME/.swiftpm}/swift-sdks/darwin.artifactbundle"
 
 # Shallow-fetch one commit of a repo into a cache dir (kept; the build reuses it).
 fetch_commit() { # repo sha dir
