@@ -23,8 +23,7 @@ for the iPhone (iOS 27.0.1).
 - Signed with `tools/sign-dev.sh` after `tools/provision-dev.py
   --bundle-id dev.omarchy.nosdk.swiftui` (profile HNVS6MM84H, 5 devices,
   expires 2027-10-09).
-- Staged: `/home/joshuawarren/scratch/apple-free/step2/SwiftUIHello-dev.ipa`
-  (executable `HelloSwiftUI`, bundle `dev.omarchy.nosdk.swiftui`).
+- Signed ipa: executable `HelloSwiftUI`, bundle `dev.omarchy.nosdk.swiftui`.
 
 ## Run on the iPhone (iOS 27.0.1, 2026-10-09)
 
