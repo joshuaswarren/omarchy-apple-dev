@@ -58,7 +58,67 @@
     NSNumber, NSBundle, NSCoder, NSDate, NSLocale, NSTimeZone, NSUUID, NSNotification, NSOperationQueue,
     NSURLSession, NSURLRequest, NSThread, NSRunLoop, NSIndexSet, NSIndexPath, NSCharacterSet, NSAttributedString,
     NSMutableString, NSMutableData, NSMutableArray<ObjectType>, NSMutableDictionary<KeyType, ObjectType>,
-    NSMutableSet<ObjectType>, NSFileManager, NSLock;
+    NSMutableSet<ObjectType>, NSFileManager, NSLock, NSException, NSURLQueryItem;
+
+/* Minimal containers for RCTLayoutContext fields. */
+#ifndef ABS
+#define ABS(a) ((a) < 0 ? -(a) : (a))
+#endif
+@interface NSHashTable<__covariant ObjectType> : NSObject
+@property(readonly) NSUInteger count;
+- (BOOL)containsObject:(nullable ObjectType)anObject;
+- (void)addObject:(nullable ObjectType)anObject;
+- (void)removeObject:(nullable ObjectType)anObject;
+@end
+@interface NSPointerArray : NSObject
+@property(readonly) NSUInteger count;
+- (void)addPointer:(nullable void *)pointer;
+- (void)removePointer:(nullable void *)pointer;
+- (nullable void *)pointerAtIndex:(NSUInteger)index;
+@end
+
+/* NSProxy surface for RCTBridgeProxy; the class comes from the device runtime. */
+#define CF_RETURNS_NOT_RETAINED __attribute__((cf_returns_not_retained))
+#define CF_RETURNS_RETAINED __attribute__((cf_returns_retained))
+#define CF_IMPLICIT_BRIDGING_ENABLED _Pragma("clang arc_cf_code_audited begin")
+#define CF_IMPLICIT_BRIDGING_DISABLED _Pragma("clang arc_cf_code_audited end")
+/* NSAssertionHandler surface for NSAssert-style macros in pod sources. */
+@interface NSAssertionHandler : NSObject
+@property (class, nonatomic, readonly) NSAssertionHandler *currentHandler;
+- (void)handleFailureInMethod:(SEL)selector object:(id)object file:(NSString *)fileName
+                   lineNumber:(NSInteger)line description:(NSString *)format, ... NS_FORMAT_FUNCTION(5, 6);
+- (void)handleFailureInFunction:(NSString *)functionName file:(NSString *)fileName
+                     lineNumber:(NSInteger)line description:(NSString *)format, ... NS_FORMAT_FUNCTION(4, 5);
+@end
+@interface NSProxy <NSObject>
++ (id)alloc;
++ (id)allocWithZone:(struct _NSZone *)zone;
+- (void)forwardInvocation:(NSInvocation *)anInvocation;
+@end
+
+/* RN 0.87 headers expect these from a full SDK; values from the public names. */
+typedef NS_ENUM(NSUInteger, NSURLRequestCachePolicy) {
+  NSURLRequestUseProtocolCachePolicy = 0, NSURLRequestReloadIgnoringLocalCacheData = 1,
+  NSURLRequestReturnCacheDataElseLoad = 2, NSURLRequestReturnCacheDataDontLoad = 4
+};
+typedef NS_ENUM(NSInteger, NSTextAlignment) {
+  NSTextAlignmentLeft = 0, NSTextAlignmentCenter = 1, NSTextAlignmentRight = 2,
+  NSTextAlignmentJustified = 3, NSTextAlignmentNatural = 4
+};
+typedef NS_ENUM(NSInteger, NSLineBreakMode) {
+  NSLineBreakByWordWrapping = 0, NSLineBreakByCharWrapping = 1, NSLineBreakByClipping = 2,
+  NSLineBreakByTruncatingHead = 3, NSLineBreakByTruncatingTail = 4, NSLineBreakByTruncatingMiddle = 5
+};
+typedef NS_ENUM(NSInteger, NSUnderlineStyle) {
+  NSUnderlineStyleNone = 0, NSUnderlineStyleSingle = 1, NSUnderlineStyleThick = 2, NSUnderlineStyleDouble = 9
+};
+typedef NS_ENUM(NSInteger, NSWritingDirection) {
+  NSWritingDirectionNatural = -1, NSWritingDirectionLeftToRight = 0, NSWritingDirectionRightToLeft = 1
+};
+typedef NS_ENUM(NSInteger, NSLineBreakStrategy) {
+  NSLineBreakStrategyNone = 0, NSLineBreakStrategyStandard = 1, NSLineBreakStrategyHangulWordWrap = 2,
+  NSLineBreakStrategyPushOut = 3
+};
 
 typedef NSString *NSNotificationName __attribute__((swift_wrapper(struct)));
 typedef NSString *NSErrorDomain __attribute__((swift_wrapper(struct)));
@@ -84,16 +144,22 @@ typedef unsigned short unichar;
 enum { NSNotFound = NSIntegerMax };
 static inline NSRange NSMakeRange(NSUInteger loc, NSUInteger len) { NSRange r; r.location = loc; r.length = len; return r; }
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 FOUNDATION_EXPORT NSString *NSStringFromClass(Class aClass);
 FOUNDATION_EXPORT Class NSClassFromString(NSString *aClassName);
 FOUNDATION_EXPORT NSString *NSStringFromSelector(SEL aSelector);
 FOUNDATION_EXPORT SEL NSSelectorFromString(NSString *aSelectorName);
+FOUNDATION_EXPORT void NSLog(NSString *format, ...) NS_FORMAT_FUNCTION(1, 2);
+FOUNDATION_EXPORT void NSLogv(NSString *format, va_list args);
+#ifdef __cplusplus
+}
+#endif
 #define NSAssert(condition, desc, ...) assert(condition)
 #define NSCAssert(condition, desc, ...) assert(condition)
 #define NSParameterAssert(condition) assert(condition)
 #define NSCParameterAssert(condition) assert(condition)
-FOUNDATION_EXPORT void NSLog(NSString *format, ...) NS_FORMAT_FUNCTION(1, 2);
-FOUNDATION_EXPORT void NSLogv(NSString *format, va_list args);
 
 typedef struct NSFastEnumerationState {
   unsigned long state;
@@ -126,6 +192,9 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)performSelectorOnMainThread:(SEL)aSelector withObject:(nullable id)arg waitUntilDone:(BOOL)wait;
 - (void)setValue:(nullable id)value forKey:(NSString *)key;
 - (nullable id)valueForKey:(NSString *)key;
+- (Class)classForCoder;
+- (id)copy;
+- (id)mutableCopy;
 @end
 
 @interface NSString : NSObject <NSCopying, NSMutableCopying, NSSecureCoding>
@@ -374,7 +443,10 @@ NS_ASSUME_NONNULL_BEGIN
 @property(class, readonly, strong) NSNotificationCenter *defaultCenter;
 - (void)addObserver:(id)observer selector:(SEL)aSelector name:(nullable NSNotificationName)aName object:(nullable id)anObject;
 - (void)removeObserver:(id)observer;
+- (void)removeObserver:(id)observer name:(nullable NSNotificationName)aName object:(nullable id)anObject;
 - (void)postNotificationName:(NSNotificationName)aName object:(nullable id)anObject;
+- (void)postNotificationName:(NSNotificationName)aName object:(nullable id)anObject userInfo:(nullable NSDictionary *)aUserInfo;
+- (void)addObserverForName:(nullable NSNotificationName)name object:(nullable id)obj queue:(nullable NSOperationQueue *)queue usingBlock:(void (^)(NSNotification *note))block API_AVAILABLE(macos(10.6), ios(4.0));
 @end
 
 @interface NSUUID : NSObject
