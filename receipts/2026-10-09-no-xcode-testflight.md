@@ -1,7 +1,6 @@
 # No-Xcode TestFlight upload — 2026-10-09
 
-Worktree: `/home/joshuawarren/src/omarchy-apple-dev-wt-nosdktf`, branch `no-xcode-testflight`,
-commits `79c37fc` + the follow-up on this branch, based on origin/main `058e74c`.
+Branch `no-xcode-testflight`, rebased onto main after the phone-free setup merge.
 
 ## Outcome
 

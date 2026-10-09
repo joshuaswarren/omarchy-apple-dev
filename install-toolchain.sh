@@ -388,9 +388,9 @@ How should this install get the iOS build files?
      Works:      Objective-C and C apps with UIKit; Swift (standard library, async/await, Foundation); Flutter
                  apps (release builds) with an Objective-C runner, Objective-C plugins and the Swift plugins
                  shared_preferences and url_launcher; asset catalogs and storyboards; install on your iPhone
-                 with a free Apple ID.
+                 with a free Apple ID; TestFlight upload of Flutter apps with a paid account.
      Not yet:    SwiftUI; the full set of system frameworks (the list grows by release); app extensions and
-                 widgets; macOS apps; TestFlight and App Store uploads.
+                 widgets; macOS apps.
      Needs:      an iPhone only to run the apps. Setup needs no phone: it copies the cache from a connected iPhone
                  or pulls it from Apple's public iOS update download; about 7 GB of temporary disk.
 
