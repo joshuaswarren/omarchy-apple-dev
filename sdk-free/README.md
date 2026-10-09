@@ -19,8 +19,9 @@ runtime headers. Choose it with `./install-toolchain.sh --mode no-xcode` (or ans
 
 ## What it gives up (for now)
 
-- SwiftUI, and Swift code that imports frameworks without an overlay (Combine, WebKit, ...): the overlay list is
-  ObjectiveC, Darwin, Dispatch, CoreGraphics and Foundation.
+- SwiftUI, for the small surface in `sdk-free/swiftui` (`App`, `WindowGroup`,
+  `View` with `Text`, `VStack`, `Button`, `@State`; sdk-free/swiftui/README.md).
+  Swift code that imports other frameworks without an overlay (Combine, WebKit, ...).
 - System frameworks beyond the ones in the list: Foundation, UIKit, CoreGraphics, QuartzCore, CoreFoundation,
   UserNotifications, and the C library. The list grows by release; a plugin that needs another framework needs its
   headers first.
