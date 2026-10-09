@@ -39,7 +39,7 @@ runtime headers. Choose it with `./install-toolchain.sh --mode no-xcode` (or ans
 |---|---|
 | `setup.sh` | builds `~/.local/share/omarchy-apple-dev/sdk-free` (`iPhoneOS.sdk`, `toolset`, `bin/actool`); safe to re-run |
 | `cc.sh` | clang for arm64 iOS against that sysroot: `sdk-free/cc.sh -c main.m -o main.o` |
-| `flutter-build.sh` | Flutter app to an unsigned `Runner.ipa` in `<app>/build/ios-sdkfree/<mode>/` |
+| `flutter-build.sh` | Flutter app to an unsigned `Runner.ipa` in `<app>/build/ios-sdkfree/<mode>/`. For an App Store upload the app icon catalog must be single-size (one universal 1024 entry in `AppIcon.appiconset`); a classic multi-size catalog makes an `Assets.car` that App Store processing never finishes (FINDINGS.md 67) |
 | `ship.sh` | the release `Runner.app` signed for the App Store and uploaded to TestFlight with `--upload` (`sdk-free/ship.sh --upload <app dir>`; the app record must exist once for the bundle id, web UI) |
 | `headers/` | the headers this mode adds to the sysroot |
 | `shims/` | stand-ins for the Xcode command-line tools that `flutter assemble` calls |

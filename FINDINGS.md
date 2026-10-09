@@ -1586,3 +1586,16 @@ comes from the framework search path. Found when an app gained
 statically): it builds, installs and runs on an iPad on iPadOS 27.0, and the
 sample with `package_info_plus` added builds in 37 s. Plugins without the
 dependency are unaffected.
+
+**67. A multi-size AppIcon appiconset compiled by actool 27.0 wedges App Store
+processing; a single-size (1024) one is processed in minutes.** Two TestFlight
+uploads of the same no-xcode Flutter app that differ only in the catalog sat
+side by side on 2026-10-09: the classic 19-entry appiconset (multi-size car,
+dozens of renditions) stayed `PROCESSING` for hours with no error on two app
+records, while the single-size catalog (one universal 1024 entry) went
+`COMPLETE` and `VALID` in about 2 minutes; swapping only the `Assets.car` into
+an otherwise fast xtool build reproduced the hang. Unlike item 35 there is no
+error: the upload never finishes. `sdk-free/flutter-build.sh` apps that will be
+shipped therefore need a single-size appiconset (the default in current Flutter
+templates is multi-size; see `sdk-free/ship.sh` and the 2026-10-09 TestFlight
+receipt).
