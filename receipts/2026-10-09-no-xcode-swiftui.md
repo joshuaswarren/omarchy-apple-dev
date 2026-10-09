@@ -26,9 +26,20 @@ for the iPhone (iOS 27.0.1).
 - Staged: `/home/joshuawarren/scratch/apple-free/step2/SwiftUIHello-dev.ipa`
   (executable `HelloSwiftUI`, bundle `dev.omarchy.nosdk.swiftui`).
 
-Not observed: a run on the iPhone. That needs the lead's phone window
-(`pymobiledevice3 apps install` + launch). The build proves every referenced
-symbol exists in the device stubs; whether the app renders is the next check.
+## Run on the iPhone (iOS 27.0.1, 2026-10-09)
+
+- First run: the device SwiftUI started our `@main App` and called our `body` and the `WindowGroup` content closure,
+  then crashed. Causes found with LLDB on the phone and fixed in `SwiftUI.swift`: the `App` protocol needs an
+  `init()` requirement; the `@inlinable` builder stubs needed real bodies; `TupleView` is frozen with `value: T`.
+- `WindowGroup { EmptyView() }` ran (white SwiftUI window).
+- Any `Text` crashed. The device types are frozen and returned in registers; ours were resilient and so used a
+  result slot the device never wrote. Declaring `Text`, `HorizontalAlignment` and `State` with the device layout
+  fixed it (see `sdk-free/swiftui/README.md`).
+- The full demo (`VStack(alignment: .center, spacing: 16) { Text("taps: \(count)"); Button("tap me") { count += 1 } }`
+  with `@State`) launched and drew `taps: 0` and a blue `tap me` button (`2026-10-09-no-xcode-swiftui-phone.png`);
+  the crash-report list gained no new entry.
+
+Not checked: tapping the button (no tap automation here), rotation, backgrounding.
 
 ## Two findings that shaped the interface
 
