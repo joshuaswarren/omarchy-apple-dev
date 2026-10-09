@@ -1623,6 +1623,21 @@ and `[Service] Restart=on-failure`, `RestartSec=1` lets systemd bring it back
 on its own instead of needing a manual restart. The two sessions run after
 adding it did not crash, so the restart itself has not been observed yet.
 
+Follow-up, 2026-10-09, from 17xande's run on an iPad (iPadOS 27.0) with `--attach`, rootless
+(joshuaswarren/omarchy-apple-dev#13, closed by the author; the notes are kept here):
+- A breakpoint set by file and line in a SwiftUI app's handler resolves and is hit after `continue`.
+- `bt` shows the app frames with file and line, and `frame variable` shows locals and arguments.
+- `thread step-over`, `step-in` and `step-out` work, and `process detach` leaves the app running.
+- `po self` falls back to `p` and prints the object.
+- Swift `expr` does not work: it fails with "cannot load underlying module for 'AVFAudio'" and
+  "Couldn't realize Swift AST type of self". `expr -l c` and `expr -l objc` work, after about
+  2 minutes of "Error while searching for Xcode SDK: HostInfoError".
+- In `LLDB_CMDS` (batch mode) a failing command aborts the rest of the list, so put risky commands last.
+- To trigger a breakpoint from outside, start the trigger in the background before the attach (the attach
+  takes about 35 s), then let `continue` block until the stop:
+  `(sleep 55; curl -s -m 100 http://localhost:PORT/route) & LLDB_CMDS=$'breakpoint set -f File.swift -l N\ncontinue\nbt\nframe variable\nprocess detach' ./device-run.sh --attach`.
+- usbmuxd stayed up through both sessions (`NRestarts=0`).
+
 **68. A multi-size AppIcon appiconset compiled by actool 27.0 wedges App Store
 processing; a single-size (1024) one is processed in minutes.** Two TestFlight
 uploads of the same no-xcode Flutter app that differ only in the catalog sat
