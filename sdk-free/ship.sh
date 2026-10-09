@@ -25,10 +25,6 @@ BUNDLE=$OUT/Runner.app
 [ -d "$BUNDLE" ] || { echo "no $BUNDLE: run sdk-free/flutter-build.sh first" >&2; exit 1; }
 [ -n "${ASC_KEY_ID:-}" ] || echo "warning: no ASC_KEY_ID: signing with the TEST identity (Apple rejects it)" >&2
 
-# The app target ships its own privacy manifest in an Xcode build; the no-xcode runner
-# has none (the Flutter engine's manifest rides in Flutter.framework).
-[ -f "$BUNDLE/PrivacyInfo.xcprivacy" ] || cp "$HERE/runner/PrivacyInfo.xcprivacy" "$BUNDLE/"
-
 echo "== 1. App Store Info.plist keys and Mach-O sdk =="
 export XCODE_VERSION=${XCODE_VERSION:-27.0} XCODE_BUILD=${XCODE_BUILD:-27A266a}
 "$PY" "$ASC" stamp "$BUNDLE" "${BUILD_NUMBER:-$(date -u +%Y%m%d%H%M)}"

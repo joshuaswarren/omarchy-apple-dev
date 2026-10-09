@@ -1622,3 +1622,16 @@ drop-in (`sudo systemctl edit usbmuxd`) with `[Unit] StartLimitIntervalSec=0`
 and `[Service] Restart=on-failure`, `RestartSec=1` lets systemd bring it back
 on its own instead of needing a manual restart. The two sessions run after
 adding it did not crash, so the restart itself has not been observed yet.
+
+**68. A multi-size AppIcon appiconset compiled by actool 27.0 wedges App Store
+processing; a single-size (1024) one is processed in minutes.** Two TestFlight
+uploads of the same no-xcode Flutter app that differ only in the catalog sat
+side by side on 2026-10-09: the classic 19-entry appiconset (multi-size car,
+dozens of renditions) stayed `PROCESSING` for hours with no error on two app
+records, while the single-size catalog (one universal 1024 entry) went
+`COMPLETE` and `VALID` in about 2 minutes; swapping only the `Assets.car` into
+an otherwise fast xtool build reproduced the hang. Unlike item 35 there is no
+error: the upload never finishes. `sdk-free/flutter-build.sh` apps that will be
+shipped therefore need a single-size appiconset (the default in current Flutter
+templates is multi-size; see `sdk-free/ship.sh` and the 2026-10-09 TestFlight
+receipt).
