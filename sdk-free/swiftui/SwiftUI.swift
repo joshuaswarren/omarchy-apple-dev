@@ -24,6 +24,10 @@ public enum ViewBuilder {
   @inlinable public static func buildBlock<Content: View>(_ content: Content) -> Content { content }
   @inlinable public static func buildBlock<C0: View, C1: View>(_ c0: C0, _ c1: C1)
     -> TupleView<(C0, C1)> { TupleView((c0, c1)) }
+  @inlinable public static func buildBlock<C0: View, C1: View, C2: View, C3: View>(
+    _ c0: C0, _ c1: C1, _ c2: C2, _ c3: C3) -> TupleView<(C0, C1, C2, C3)> {
+    TupleView((c0, c1, c2, c3))
+  }
   @inlinable public static func buildExpression<Content: View>(_ content: Content) -> Content { content }
 }
 
@@ -146,4 +150,99 @@ extension Button where Label == Text {
 
 public struct Binding<Value> {
   public init(wrappedValue: Value) { fatalError() }
+}
+
+// Device layout (iOS 27.0.1 SwiftUICore reflection dump): Color
+// { provider: AnyColorBox } — one word, a class reference; Color, Font and
+// Image are @frozen in the OSS interface and the device dump fields match,
+// so each passes in a single register. A resilient-empty Color here would
+// make clients pass an empty value where the device init reads a register.
+@frozen public struct Color {
+  public var provider: AnyObject
+  public static var red: Color { fatalError() }
+  public static var green: Color { fatalError() }
+  public static var blue: Color { fatalError() }
+  public static var orange: Color { fatalError() }
+  public static var gray: Color { fatalError() }
+  public static var primary: Color { fatalError() }
+}
+
+// Device layout: Font { provider: AnyFontBox } — one word. The statics below
+// are plain getters the device exports (Font.largeTitle etc.); no default
+// arguments: the device exports no default-argument generators for these.
+@frozen public struct Font {
+  public var provider: AnyObject
+  public static var largeTitle: Font { fatalError() }
+  public static var title: Font { fatalError() }
+  public static var headline: Font { fatalError() }
+  public static var body: Font { fatalError() }
+}
+
+// Device layout: Image { provider: AnyImageProviderBox } — one word.
+// Image(systemName:) is the device init _$s7SwiftUI5ImageV10systemNameACSS_tcfC.
+@frozen public struct Image: View {
+  public var provider: AnyObject
+  public init(systemName: String) { fatalError() }
+  public var body: some View { EmptyView() }
+}
+
+public protocol ShapeStyle {}
+
+// Modifier methods are protocol-extension functions the device exports (the
+// demangled symbols say "(extension in SwiftUI):SwiftUI.View.padding(...)
+// -> some"); a non-inlinable declaration with a fatalError body links the
+// device implementation. Each returns the device's opaque "some View"
+// (ModifiedContent<Self, _XLayout>), whose descriptor and metadata accessor
+// the device also exports under the same mangled name. The zero-argument
+// padding() is unusable: the device exports no default-argument generator.
+extension View {
+  public func padding(_ length: CGFloat) -> some View { EmptyView() }
+  public func font(_ font: Font?) -> some View { EmptyView() }
+  public func foregroundColor(_ color: Color?) -> some View { EmptyView() }
+  public func foregroundStyle<S: ShapeStyle>(_ style: S) -> some View { EmptyView() }
+  public func navigationTitle(_ title: LocalizedStringKey) -> some View { EmptyView() }
+}
+
+// iOS 27 device shapes, read from the reflection dump and exported symbols.
+// List has TWO generic parameters (Selection first), both unconstrained at
+// the struct: the plain List { } initializer lives in
+// `extension List where Selection == Never` and returns
+// List<Never, Content> (device symbol ...4ListVAAs5NeverORszrlE7content...),
+// and the View conformance is `where Content: View`. The content closure is
+// @escaping in the device mangling (yXE_), a plain () -> Content would
+// mangle yc_ and miss.
+public struct List<Selection, Content>: View {
+  public init() {}
+  public var body: some View { EmptyView() }
+}
+
+extension List where Selection == Never {
+  public init(@ViewBuilder content: () -> Content) { fatalError() }
+}
+
+public struct ForEach<Data, ID, Content> {
+  public init() {}
+}
+
+extension ForEach: View where Content: View {
+  public var body: some View { EmptyView() }
+}
+
+extension ForEach where Data == Range<Int>, ID == Int, Content: View {
+  public init(_ data: Range<Int>, @ViewBuilder content: @escaping (Int) -> Content) { fatalError() }
+}
+
+// The label closure must stay UNMARKED: an unmarked () -> Label mangles
+// xyXEt exactly like the device, while @escaping mangles a bare yc and
+// misses the symbol (same shape as Button above).
+public struct NavigationLink<Label: View, Destination: View>: View {
+  public init(destination: Destination, @ViewBuilder label: () -> Label) { fatalError() }
+  public var body: some View { EmptyView() }
+}
+
+// One-word-initing wrapper: the device init takes a String and copies it
+// (symbol ...18LocalizedStringKeyVyACSScfC). The label parameter of
+// navigationTitle is this type, not String.
+public struct LocalizedStringKey {
+  public init(_ value: String) { fatalError() }
 }
