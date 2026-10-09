@@ -74,7 +74,12 @@ public struct WindowGroup<Content: View>: Scene {
   public var body: some Scene { EmptyScene() }
 }
 
-public struct HorizontalAlignment {
+// Device layout: HorizontalAlignment { key: AlignmentKey { bits: UInt } } —
+// 8 bytes, passed in one register (SwiftUICore metadata). Resilient-empty
+// here made clients pass it indirectly while VStack.init(alignment:) read a
+// register.
+@frozen public struct HorizontalAlignment {
+  public var key: UInt
   public static var center: HorizontalAlignment { fatalError() }
   public static var leading: HorizontalAlignment { fatalError() }
   public static var trailing: HorizontalAlignment { fatalError() }
@@ -86,7 +91,28 @@ public struct VStack<Content: View>: View {
   public var body: some View { EmptyView() }
 }
 
-public struct Text: View {
+// Device layout (iOS 27.0.1 SwiftUICore, verified by disassembly):
+// Text is @frozen, 0x20 bytes, returned in x0..x3 (payload words, tag byte,
+// modifiers), never through an sret. Text.init(verbatim:) (SwiftUICore
+// 0x18925d224) passes the String through in x0,x1 and sets w2=0;
+// Text.init(any TextStorage) (0x18925ce84) sets w2=1. A resilient Text here
+// made clients call those inits with an sret the device never writes, so the
+// stored value was uninitialized stack and the WindowGroup destroy released
+// garbage.
+@frozen public struct Text: View {
+  // Tag byte at offset 0x10: 0 = string, 1 = device text storage.
+  // String is the only payload our clients can produce; the second case
+  // exists to occupy the payload area so the tag lands in a trailing byte
+  // (offset 0x10, size 0x18) exactly like the device enum — a payload-less
+  // second case lets the compiler fold the tag into String's spare bits and
+  // shrink Text to 0x18, which is NOT the device layout.
+  @frozen public enum Storage {
+    case string(String)
+    case deviceStorage(UInt64, UInt64)
+  }
+  public struct Modifier {}
+  public var storage: Storage
+  public var modifiers: [Modifier]
   public init<S: StringProtocol>(_ content: S) { fatalError() }
   public init(verbatim content: String) { fatalError() }
   public var body: some View { EmptyView() }
@@ -101,8 +127,15 @@ extension Button where Label == Text {
   public init<S: StringProtocol>(_ title: S, action: @escaping () -> Void) { fatalError() }
 }
 
+// Device layout: State { _value: Value, _location: AnyLocation<Value>? } —
+// the location is a one-word class existential. Resilient-empty here made
+// clients store zero bytes while the device init wrote the real fields.
+// AnyObject? gives the same one-word existential with the same
+// retain/release semantics as the device's AnyLocation box.
 @propertyWrapper
-public struct State<Value> {
+@frozen public struct State<Value> {
+  public var _value: Value
+  public var _location: AnyObject?
   public init(wrappedValue: Value) { fatalError() }
   public var wrappedValue: Value {
     get { fatalError() }
