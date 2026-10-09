@@ -20,17 +20,17 @@ import CoreGraphics
 
 @resultBuilder
 public enum ViewBuilder {
-  @inlinable public static func buildBlock() -> EmptyView { fatalError() }
-  @inlinable public static func buildBlock<Content: View>(_ content: Content) -> Content { fatalError() }
+  @inlinable public static func buildBlock() -> EmptyView { EmptyView() }
+  @inlinable public static func buildBlock<Content: View>(_ content: Content) -> Content { content }
   @inlinable public static func buildBlock<C0: View, C1: View>(_ c0: C0, _ c1: C1)
-    -> TupleView<(C0, C1)> { fatalError() }
-  @inlinable public static func buildExpression<Content: View>(_ content: Content) -> Content { fatalError() }
+    -> TupleView<(C0, C1)> { TupleView((c0, c1)) }
+  @inlinable public static func buildExpression<Content: View>(_ content: Content) -> Content { content }
 }
 
 @resultBuilder
 public enum SceneBuilder {
-  public static func buildBlock<Content: Scene>(_ content: Content) -> Content { fatalError() }
-  public static func buildExpression<Content: Scene>(_ content: Content) -> Content { fatalError() }
+  @inlinable public static func buildBlock<Content: Scene>(_ content: Content) -> Content { content }
+  @inlinable public static func buildExpression<Content: Scene>(_ content: Content) -> Content { content }
 }
 
 public protocol View {
@@ -46,6 +46,7 @@ public protocol Scene {
 public protocol App {
   associatedtype Body: Scene
   var body: Self.Body { get }
+  init()
 }
 
 extension App {
@@ -57,8 +58,9 @@ public struct EmptyView: View {
   public var body: EmptyView { fatalError() }
 }
 
-public struct TupleView<T>: View {
-  public init(_ value: T) { fatalError() }
+@frozen public struct TupleView<T>: View {
+  public var value: T
+  @inlinable public init(_ value: T) { self.value = value }
   public var body: some View { EmptyView() }
 }
 
