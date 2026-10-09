@@ -31,11 +31,24 @@ this script is the demo.
   symbols (only internal helpers like `NavigationStackContext` appear in
   the reflection dump). Navigation bars without a host also render nothing;
   the staged app shows whether `List`/`navigationTitle` need it.
-- **Blocker (c)**, from stub/dump reads, not yet attempted in code:
-  `@Observable` needs the `Observation` module built from the Swift source
-  tag plus the device exporting `libswiftObservation`; `@Environment` and
-  `@Binding` declarations follow the same recipe as `State` once the device
-  symbols for `Environment`/`EnvironmentValues` keyed paths are mapped.
+- **Blockers (c)**, from stub/dump reads, not attempted in code beyond the
+  existing `State`/`Binding` stubs:
+  `@Binding` is blocked — `State.projectedValue` (the `$state` getter that
+  yields `Binding<Value>`) has no exported symbol, and `Binding` exports no
+  plain `init(wrappedValue:)`/`init(projectedValue:)` (only converter inits
+  like `Binding<V>? -> Binding<V>` and `Binding<V> -> Binding<Double?>`),
+  so a client cannot obtain a `Binding` from `@State` at all.
+  `@Environment` is blocked — the public `Environment<Value>` wrapper has no
+  exported `init(_: KeyPath<EnvironmentValues, Value>)` symbol (the only
+  `11Environment` matches are the internal
+  `ViewRendererConfiguration.Environment`); `EnvironmentValues` itself is
+  rich (1960 exported symbols). `@Observable` is the least blocked: the
+  device exports `usr/lib/libswiftObservation.dylib` (101 Swift symbols in
+  its stub) and `State.init(wrappedValue:)` has an
+  `Observation.Observable`-constrained form, but the `Observation` module
+  must first be built from the Swift source tag like `build-stdlib.sh`
+  builds the stdlib (macro plugin already in the toolchain at
+  `lib/swift/host/plugins/libObservationMacros.so`).
 
 ## How it works
 
