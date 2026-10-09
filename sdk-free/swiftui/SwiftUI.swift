@@ -88,6 +88,7 @@ public struct VStack<Content: View>: View {
 
 public struct Text: View {
   public init<S: StringProtocol>(_ content: S) { fatalError() }
+  public init(verbatim content: String) { fatalError() }
   public var body: some View { EmptyView() }
 }
 
