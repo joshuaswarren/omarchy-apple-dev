@@ -13,15 +13,15 @@ runtime headers. Choose it with `./install-toolchain.sh --mode no-xcode` (or ans
   (sdk-free/swift/README.md, receipts/2026-10-09).
 - Flutter apps: release builds, with an Objective-C runner and Objective-C plugins (for example `sqflite`,
   `path_provider`, `geolocator`, `image_picker`, `permission_handler`). `sdk-free/flutter-build.sh <app dir>`.
+- A small SwiftUI subset (`App`, `WindowGroup`, `View` with `Text`, `VStack`, `Button`, `@State`; sdk-free/swiftui/README.md).
 - Asset catalogs (icons) and storyboards, compiled by this repo's `actool` and `ibtool`.
 - Signing with a development profile (`tools/provision-dev.py`, `tools/sign-dev.sh`). `xtool install` with a free Apple
   ID is the intended route and is not yet checked in this mode.
 
 ## What it gives up (for now)
 
-- SwiftUI, for the small surface in `sdk-free/swiftui` (`App`, `WindowGroup`,
-  `View` with `Text`, `VStack`, `Button`, `@State`; sdk-free/swiftui/README.md).
-  Swift code that imports other frameworks without an overlay (Combine, WebKit, ...).
+- SwiftUI beyond the small surface in `sdk-free/swiftui`, and Swift code that imports other frameworks without an
+  overlay (Combine, WebKit, ...).
 - System frameworks beyond the ones in the list: Foundation, UIKit, CoreGraphics, QuartzCore, CoreFoundation,
   UserNotifications, and the C library. The list grows by release; a plugin that needs another framework needs its
   headers first.

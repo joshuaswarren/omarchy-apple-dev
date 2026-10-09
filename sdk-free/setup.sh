@@ -48,6 +48,9 @@ IMAGES="/usr/lib/libSystem.B.dylib /usr/lib/libobjc.A.dylib /usr/lib/libc++.1.dy
 /System/Library/Frameworks/QuartzCore.framework/QuartzCore
 /System/Library/Frameworks/UIKit.framework/UIKit
 /System/Library/Frameworks/UIKitCore.framework/UIKitCore
+/System/Library/Frameworks/SwiftUI.framework/SwiftUI /System/Library/Frameworks/SwiftUICore.framework/SwiftUICore
+/System/Library/Frameworks/Combine.framework/Combine /System/Library/Frameworks/CoreTransferable.framework/CoreTransferable
+/System/Library/Frameworks/DeveloperToolsSupport.framework/DeveloperToolsSupport
 /usr/lib/swift/libswiftCore.dylib /usr/lib/swift/libswiftSwiftOnoneSupport.dylib /usr/lib/swift/libswift_Concurrency.dylib
 /usr/lib/swift/libswift_StringProcessing.dylib /usr/lib/swift/libswift_RegexParser.dylib /usr/lib/swift/libswiftDarwin.dylib
 /usr/lib/swift/libswiftObjectiveC.dylib /usr/lib/swift/libswiftDispatch.dylib /usr/lib/swift/libswiftCoreFoundation.dylib
@@ -172,7 +175,7 @@ elif [ ! -f "$tbd/UIKit.tbd" ]; then
     # iOS 27 folds UIKitCore into the UIKit stub, and Swift overlay libraries differ by release: only the
     # C/Objective-C images are required
     "$IPSW" dyld tbd "$cache" "$image" -o "$tbd" >/dev/null 2>&1 || {
-      case "$image" in */UIKitCore | /usr/lib/swift/*) echo "note: $image is not in this cache" ;; *) echo "failed: $image" >&2; exit 1 ;; esac
+      case "$image" in */UIKitCore | /usr/lib/swift/* | */SwiftUI | */SwiftUICore | */Combine | */CoreTransferable | */DeveloperToolsSupport) echo "note: $image is not in this cache" ;; *) echo "failed: $image" >&2; exit 1 ;; esac
     }
   done
   echo "stubs written to $tbd"
@@ -193,7 +196,7 @@ cut_stub "$tbd/libSystem.B.dylib.tbd" "$SR/usr/lib/libSystem.tbd"
 cut_stub "$tbd/libobjc.A.dylib.tbd" "$SR/usr/lib/libobjc.tbd"
 cut_stub "$tbd/libc++.1.dylib.tbd" "$SR/usr/lib/libc++.tbd"
 cut_stub "$tbd/libc++abi.dylib.tbd" "$SR/usr/lib/libc++abi.tbd"
-for f in UIKit UIKitCore Foundation CoreFoundation CoreGraphics QuartzCore; do
+for f in UIKit UIKitCore Foundation CoreFoundation CoreGraphics QuartzCore SwiftUI SwiftUICore Combine CoreTransferable DeveloperToolsSupport; do
   [ -f "$tbd/$f.tbd" ] || continue
   mkdir -p "$SR/System/Library/Frameworks/$f.framework"
   cut_stub "$tbd/$f.tbd" "$SR/System/Library/Frameworks/$f.framework/$f.tbd"

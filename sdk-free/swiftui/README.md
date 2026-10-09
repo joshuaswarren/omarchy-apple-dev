@@ -1,7 +1,7 @@
 # SwiftUI in no-xcode mode
 
 A minimal SwiftUI app (`App` protocol, `WindowGroup`, `View` with `Text`, `VStack`,
-`Button`, `@State`) builds and links here without the Xcode download. The first
+`Button`, `@State`) builds, links and runs on an iPhone (iOS 27.0.1) without the Xcode download. The first
 build is `sdk-free/swiftui/swiftui-build.sh HelloApp.swift`; the app source next to
 this script is the demo. Receipt: `receipts/2026-10-09-no-xcode-swiftui.md`.
 
@@ -26,20 +26,19 @@ this script is the demo. Receipt: `receipts/2026-10-09-no-xcode-swiftui.md`.
   and links with `-framework SwiftUI -framework SwiftUICore -framework Combine`.
   A symbol that misses the stubs fails the build before the link.
 
-## One-time setup (per connected iPhone)
+## Setup
 
-The SwiftUI and Combine stubs are not part of `sdk-free/setup.sh` yet. Cut them
-from the phone's system-library cache with `ipsw` (paths shown for the cache
-copied by `dl-dsc27.sh` into `dsc27/24A446__iPhone16,2/`):
+`sdk-free/setup.sh` cuts the SwiftUI, SwiftUICore, Combine, CoreTransferable and DeveloperToolsSupport link stubs
+together with the other stubs. An older sysroot needs `sdk-free/setup.sh --repair`.
 
-    ipsw dyld tbd <dsc> /System/Library/Frameworks/SwiftUI.framework/SwiftUI -o tbds
-    ipsw dyld tbd <dsc> /System/Library/Frameworks/SwiftUICore.framework/SwiftUICore -o tbds
-    ipsw dyld tbd <dsc> /System/Library/Frameworks/Combine.framework/Combine -o tbds
-    ipsw dyld tbd <dsc> /System/Library/Frameworks/CoreTransferable.framework/CoreTransferable -o tbds
-    ipsw dyld tbd <dsc> /System/Library/Frameworks/DeveloperToolsSupport.framework/DeveloperToolsSupport -o tbds
+## Layout rule that decides whether it runs
 
-and copy each `.tbd` into the sysroot at
-`$SDKFREE_HOME/iPhoneOS.sdk/System/Library/Frameworks/<Name>.framework/<Name>`.
+The iPhone's SwiftUI types are frozen and the device code passes small values in registers. A declaration that is
+resilient (no `@frozen`, no stored fields) makes the app pass a result slot that the device code never writes, and the
+device then frees garbage. `Text`, `HorizontalAlignment`, `State` and `TupleView` therefore carry the device layout
+(read with `ipsw dyld macho --swift` / `ipsw swift-dump` from the cache). `Text` is 32 bytes: a two-word payload, a tag
+byte, and the modifier array. Generic returns such as `VStack` and `WindowGroup` stay layout-safe through runtime
+metadata. Check any new type's size with `MemoryLayout` against the device layout before you trust it.
 
 ## What is next
 

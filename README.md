@@ -96,7 +96,7 @@ without a choice it uses `full`.
 
 | | **full** (Xcode download) | **no Xcode download** (experimental) |
 |---|---|---|
-| Languages | Swift, SwiftUI, Objective-C, C, C++ | Objective-C, C and Swift (standard library, async/await, Foundation); no SwiftUI yet |
+| Languages | Swift, SwiftUI, Objective-C, C, C++ | Objective-C, C and Swift (standard library, async/await, Foundation), plus a small SwiftUI subset (`App`, `WindowGroup`, `Text`, `VStack`, `Button`, `@State`) |
 | Flutter | release builds, any plugin whose source builds | release builds with Objective-C plugins and the Swift plugins `shared_preferences` and `url_launcher` |
 | System frameworks | everything in the Xcode SDK | a short list (Foundation, UIKit, CoreGraphics, QuartzCore, CoreFoundation, UserNotifications, libc), growing |
 | Extensions, widgets, macOS apps | yes | not yet |
