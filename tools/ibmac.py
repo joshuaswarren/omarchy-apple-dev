@@ -3001,6 +3001,122 @@ def _pan_gesture(b, o):
     o.add("NSGestureRecognizers", *b.ref(gest))
 
 
+def _scroll_clip_keys(b, cv_el, cv, doc, doc_el, is_table, o):
+    """The clip view's frame, table-header bounds and base keys; returns the
+    document's tableHeaderView element or None."""
+    r = cv_el.find("rect[@key='frame']")
+    # probe CrashReporter golden [88]: a clipView with a non-zero xib origin
+    # (borderType=line 1px inset) archives NSFrame, zero-origin keeps
+    # NSFrameSize
+    zero = r.get("x") in ("0", "0.0") and r.get("y") in ("0", "0.0")
+    if zero:
+        cv.add("NSFrameSize", *b.ref(b.string("{%s, %s}" % (_fmt_g(r.get("width")),
+                                                            _fmt_g(r.get("height"))))))
+    else:
+        cv.add("NSFrame", *b.ref(b.string("{{%s, %s}, {%s, %s}}" % (
+            r.get("x"), r.get("y"), _fmt_g(r.get("width")), _fmt_g(r.get("height"))))))
+    hv_el0 = doc_el.find("tableHeaderView[@key='headerView']") if is_table else None
+    if hv_el0 is not None:
+        cv.add("NSBounds", *b.ref(b.string(
+            "{{0, -%s}, {%s, %s}}" % (_fmt_g(hv_el0.find("rect[@key='frame']").get("height")),
+                                      _fmt_g(r.get("width")),
+                                      _fmt_g(r.get("height"))))))
+    cv.add("NSSuperview", *b.ref(o))
+    cv.add("NSNextKeyView", *b.ref(doc))
+    cv.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
+    cv.add("IBNSSafeAreaLayoutGuide", *(N.NIL, None))
+    cv.add("IBNSLayoutMarginsGuide", *(N.NIL, None))
+    cv.add("IBNSClipsToBounds", *b.int8(0))
+    cv.add("NSDocView", *b.ref(doc))
+    return hv_el0
+
+
+def _scroll_clip_bg(b, cv_el, cv, is_table, where):
+    cv_flags = (0 if cv_el.get("drawsBackground") == "NO" else 4) \
+        + (2 if cv_el.get("copiesOnScroll") == "NO" else 0)
+    bg_el = cv_el.find("color[@key='backgroundColor']")
+    nil_bg = cv_el.find("nil[@key='backgroundColor']") is not None
+    if not nil_bg:
+        if bg_el is not None:
+            cv.add("NSBGColor", *b.ref(_color_ref(b, bg_el, where)))
+        else:
+            # golden ActivityLog/ErrorLog [21]: non-table clipViews without
+            # an explicit backgroundColor archive controlBackgroundColor too
+            cv.add("NSBGColor",
+                   *b.ref(b.catalog_color("System", "controlBackgroundColor", where)))
+    if not is_table:
+        cv.add("NSCursor", *b.ref(_cursor(b, "{1, -1}", 0)))
+    if cv_flags:
+        cv.add("NScvFlags", *b.int8(cv_flags))
+    cv.add("NSAutomaticallyAdjustsContentInsets", *b.boolean(False))
+
+
+def _scroll_scrollers(b, el, o, arr, where):
+    """The horizontal/vertical NSScrollers, appended to the scroll view's
+    subviews; returns (h_el, v_el, hs, vs)."""
+    h_el = el.find("scroller[@key='horizontalScroller']")
+    v_el = el.find("scroller[@key='verticalScroller']")
+    hs = _scroller(b, h_el, where, o) if h_el is not None else None
+    vs = _scroller(b, v_el, where, o) if v_el is not None else None
+    if hs is not None:
+        arr.add("UINibEncoderEmptyKey", *b.ref(hs))
+    if vs is not None:
+        arr.add("UINibEncoderEmptyKey", *b.ref(vs))
+    return h_el, v_el, hs, vs
+
+
+def _scroll_frame_keys(b, el, o, where, superview, cv):
+    r2 = el.find("rect[@key='frame']")
+    if float(r2.get("x", 0)) == 0 and float(r2.get("y", 0)) == 0:
+        o.add("NSFrameSize", *b.ref(b.string(
+            "{%s, %s}" % (_fmt_g(r2.get("width")), _fmt_g(r2.get("height"))))))
+    else:
+        o.add("NSFrame", *b.ref(b.string(_rect(el, "frame", where))))
+    if superview is not None:
+        o.add("NSSuperview", *b.ref(superview))
+    o.add("NSNextKeyView", *b.ref(cv))
+    o.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
+    if _translates(el):
+        o.add("NSDoNotTranslateAutoresizingMask", *b.boolean(False))
+
+
+def _scroll_tail_keys(b, el, o, doc_el, is_table, cv, hclip,
+                      h_el, v_el, hs, vs, key, where, id_map):
+    """sFlags, scroller references, content/header clip views, scroll
+    amounts and magnification."""
+    o.add("IBNSSafeAreaLayoutGuide", *(N.NIL, None))
+    o.add("IBNSLayoutMarginsGuide", *(N.NIL, None))
+    o.add("IBNSClipsToBounds", *b.int8(0))
+    o.add("NSsFlags", N.INT32, SCROLL_SFLAGS[key])
+    if vs is not None:
+        o.add("NSVScroller", *b.ref(vs))
+        id_map[v_el.get("id")] = vs
+    if hs is not None:
+        o.add("NSHScroller", *b.ref(hs))
+        id_map[h_el.get("id")] = hs
+    o.add("NSContentView", *b.ref(cv))
+    if hclip is not None:
+        o.add("NSHeaderClipView", *b.ref(hclip))
+    hls = float(el.get("horizontalLineScroll", 10))
+    vls = float(el.get("verticalLineScroll", 10))
+    if is_table:
+        # line scrolls archive the table's row STRIDE: archived row height
+        # plus intercell spacing height (goldens: Sidebar 32+0, TTT 96+0,
+        # APV 24+2=26; the xib lineScroll attrs are ignored)
+        rowh = _table_row_height(doc_el, where)
+        size = doc_el.find("size[@key='intercellSpacing']")
+        stride = rowh + (float(size.get("height")) if size is not None else 0.0)
+        hls = vls = stride
+    hps = float(el.get("horizontalPageScroll", 10))
+    vps = float(el.get("verticalPageScroll", 10))
+    if (hls, vls, hps, vps) != (10.0, 10.0, 10.0, 10.0):
+        import struct as _struct
+        o.add("NSScrollAmts", N.DATA, _struct.pack(">4f", hps, vps, hls, vls))
+    o.add("NSMinMagnification", N.DOUBLE, 0.25)
+    o.add("NSMaxMagnification", N.DOUBLE, 4.0)
+    o.add("NSMagnification", N.DOUBLE, 1.0)
+
+
 def _scroll_view(b, el, where, superview, id_map, parent=None):
     """<scrollView> -> NSScrollView + NSClipView + scrollers + pan gesture."""
     key = (el.get("borderType", "bezel"), el.get("autohidesScrollers") == "YES",
@@ -3033,102 +3149,16 @@ def _scroll_view(b, el, where, superview, id_map, parent=None):
     cv.add("NSSubviews", *b.ref(carr))
     doc, doc_el, is_table = _scroll_doc_view(b, el, cv_el, cv, where, id_map, carr)
     arr.add("UINibEncoderEmptyKey", *b.ref(cv))
-    r = cv_el.find("rect[@key='frame']")
-    # probe CrashReporter golden [88]: a clipView with a non-zero xib origin
-    # (borderType=line 1px inset) archives NSFrame, zero-origin keeps
-    # NSFrameSize
-    zero = r.get("x") in ("0", "0.0") and r.get("y") in ("0", "0.0")
-    if zero:
-        cv.add("NSFrameSize", *b.ref(b.string("{%s, %s}" % (_fmt_g(r.get("width")),
-                                                            _fmt_g(r.get("height"))))))
-    else:
-        cv.add("NSFrame", *b.ref(b.string("{{%s, %s}, {%s, %s}}" % (
-            r.get("x"), r.get("y"), _fmt_g(r.get("width")), _fmt_g(r.get("height"))))))
-    hv_el0 = doc_el.find("tableHeaderView[@key='headerView']") if is_table else None
-    if hv_el0 is not None:
-        cv.add("NSBounds", *b.ref(b.string(
-            "{{0, -%s}, {%s, %s}}" % (_fmt_g(hv_el0.find("rect[@key='frame']").get("height")),
-                                      _fmt_g(r.get("width")),
-                                      _fmt_g(r.get("height"))))))
-    cv.add("NSSuperview", *b.ref(o))
-    cv.add("NSNextKeyView", *b.ref(doc))
-    cv.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
-    cv.add("IBNSSafeAreaLayoutGuide", *(N.NIL, None))
-    cv.add("IBNSLayoutMarginsGuide", *(N.NIL, None))
-    cv.add("IBNSClipsToBounds", *b.int8(0))
-    cv.add("NSDocView", *b.ref(doc))
+    hv_el0 = _scroll_clip_keys(b, cv_el, cv, doc, doc_el, is_table, o)
     hv_el = doc_el.find("tableHeaderView[@key='headerView']") if is_table else None
     hclip = _scroll_header_clip(b, o, arr, hv_el) if hv_el is not None else None
-    cv_flags = (0 if cv_el.get("drawsBackground") == "NO" else 4) \
-        + (2 if cv_el.get("copiesOnScroll") == "NO" else 0)
-    bg_el = cv_el.find("color[@key='backgroundColor']")
-    nil_bg = cv_el.find("nil[@key='backgroundColor']") is not None
-    if not nil_bg:
-        if bg_el is not None:
-            cv.add("NSBGColor", *b.ref(_color_ref(b, bg_el, where)))
-        else:
-            # golden ActivityLog/ErrorLog [21]: non-table clipViews without
-            # an explicit backgroundColor archive controlBackgroundColor too
-            cv.add("NSBGColor",
-                   *b.ref(b.catalog_color("System", "controlBackgroundColor", where)))
-    if not is_table:
-        cv.add("NSCursor", *b.ref(_cursor(b, "{1, -1}", 0)))
-    if cv_flags:
-        cv.add("NScvFlags", *b.int8(cv_flags))
-    cv.add("NSAutomaticallyAdjustsContentInsets", *b.boolean(False))
-    h_el = el.find("scroller[@key='horizontalScroller']")
-    v_el = el.find("scroller[@key='verticalScroller']")
-    hs = _scroller(b, h_el, where, o) if h_el is not None else None
-    vs = _scroller(b, v_el, where, o) if v_el is not None else None
-    if hs is not None:
-        arr.add("UINibEncoderEmptyKey", *b.ref(hs))
-    if vs is not None:
-        arr.add("UINibEncoderEmptyKey", *b.ref(vs))
-    r2 = el.find("rect[@key='frame']")
-    if float(r2.get("x", 0)) == 0 and float(r2.get("y", 0)) == 0:
-        o.add("NSFrameSize", *b.ref(b.string(
-            "{%s, %s}" % (_fmt_g(r2.get("width")), _fmt_g(r2.get("height"))))))
-    else:
-        o.add("NSFrame", *b.ref(b.string(_rect(el, "frame", where))))
-    if superview is not None:
-        o.add("NSSuperview", *b.ref(superview))
-    o.add("NSNextKeyView", *b.ref(cv))
-    o.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
-    if _translates(el):
-        o.add("NSDoNotTranslateAutoresizingMask", *b.boolean(False))
+    _scroll_clip_bg(b, cv_el, cv, is_table, where)
+    h_el, v_el, hs, vs = _scroll_scrollers(b, el, o, arr, where)
+    _scroll_frame_keys(b, el, o, where, superview, cv)
     scons = _ordered_constraints(b, el, o, where, id_map)
     _pan_gesture(b, o)
-    o.add("IBNSSafeAreaLayoutGuide", *(N.NIL, None))
-    o.add("IBNSLayoutMarginsGuide", *(N.NIL, None))
-    o.add("IBNSClipsToBounds", *b.int8(0))
-    o.add("NSsFlags", N.INT32, SCROLL_SFLAGS[key])
-    if vs is not None:
-        o.add("NSVScroller", *b.ref(vs))
-        id_map[v_el.get("id")] = vs
-    if hs is not None:
-        o.add("NSHScroller", *b.ref(hs))
-        id_map[h_el.get("id")] = hs
-    o.add("NSContentView", *b.ref(cv))
-    if hclip is not None:
-        o.add("NSHeaderClipView", *b.ref(hclip))
-    hls = float(el.get("horizontalLineScroll", 10))
-    vls = float(el.get("verticalLineScroll", 10))
-    if is_table:
-        # line scrolls archive the table's row STRIDE: archived row height
-        # plus intercell spacing height (goldens: Sidebar 32+0, TTT 96+0,
-        # APV 24+2=26; the xib lineScroll attrs are ignored)
-        rowh = _table_row_height(doc_el, where)
-        size = doc_el.find("size[@key='intercellSpacing']")
-        stride = rowh + (float(size.get("height")) if size is not None else 0.0)
-        hls = vls = stride
-    hps = float(el.get("horizontalPageScroll", 10))
-    vps = float(el.get("verticalPageScroll", 10))
-    if (hls, vls, hps, vps) != (10.0, 10.0, 10.0, 10.0):
-        import struct as _struct
-        o.add("NSScrollAmts", N.DATA, _struct.pack(">4f", hps, vps, hls, vls))
-    o.add("NSMinMagnification", N.DOUBLE, 0.25)
-    o.add("NSMaxMagnification", N.DOUBLE, 4.0)
-    o.add("NSMagnification", N.DOUBLE, 1.0)
+    _scroll_tail_keys(b, el, o, doc_el, is_table, cv, hclip,
+                      h_el, v_el, hs, vs, key, where, id_map)
     pairs = [(o, parent), (cv, o), (doc, cv)]
     if is_table:
         pairs.append(_DeferredPairs(
