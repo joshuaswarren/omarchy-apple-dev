@@ -2714,28 +2714,9 @@ def _cursor(b, hotspot, kind):
 def _underline(b):
     return b.number(N.INT8, 1)
 
-
-def _text_view(b, el, where, superview):
-    """<textView> (+ custom class) -> swapper with the text stack (oracle About)."""
-    o = b.new("NSClassSwapper" if el.get("customClass") else "NSTextView")
-    if el.get("customClass"):
-        o.add("NSClassName", *b.ref(b.string(I._swift_class(el))))
-        o.add("NSOriginalClassName", *b.ref(b.string("NSTextView")))
-    o.add("NSNextResponder", *(b.ref(superview) if superview is not None else (N.NIL, None)))
-    o.add("NSNibTouchBar", *(N.NIL, None))
-    v, vt = _vflags(el, where)
-    o.add("NSvFlags", vt, v)
-    r = el.find("rect[@key='frame']")
-    vert = el.get("verticallyResizable") == "YES"
-    if vert:
-        o.add("NSFrameSize", *b.ref(b.string("{%s, %s}" % (_fmt_g(r.get("width")),
-                                                           _fmt_g(r.get("height"))))))
-    else:
-        o.add("NSFrame", *b.ref(b.string(_rect(el, "frame", where))))
-    max_sz = el.find("size[@key='maxSize']")
-    max_s = "{%s, %s}" % (_fmt_g(max_sz.get("width")), _fmt_g(max_sz.get("height"))) \
-        if max_sz is not None else "{0, 0}"
-
+def _text_stack(b, el, o, r):
+    """NSTextContainer + NSLayoutManager + NSTextStorage for one text view;
+    returns (container, layout_manager)."""
     tc = b.new("NSTextContainer")
     lm = b.new("NSLayoutManager")
     tc.add("NSLayoutManager", *b.ref(lm))
@@ -2756,17 +2737,20 @@ def _text_view(b, el, where, superview):
     lm.add("NSTextContainers", *b.ref(tcs))
     lm.add("NSLMFlags", *b.int8(102))
     lm.add("NSDelegate", *(N.NIL, None))
+    return tc, lm
 
+
+def _text_shared_data(b, el, where):
+    """NSTextViewSharedData. NSFlags/NSMoreFlags/completion: probe series
+    t0-t21 (macstudio /tmp/mnprobe11, xibs in macnib-work/probe11) + corpus
+    points About direct/scroll, Crash, AL — fully orthogonal bits:
+      0x1|0x800 base; 0x2 editable (default YES); 0x4 richText != NO;
+      0x100 backgroundColor element present and drawsBackground != "NO";
+      0x200 smartInsertDelete; 0x4000000 spellingCorrection;
+      0x40000000 incrementalSearchingEnabled.
+    NSMoreFlags 0x2 follows the charPicker attr; the completion key is
+    TRUE unless a textCompletion attr archives false."""
     sd = b.new("NSTextViewSharedData")
-    # NSFlags/NSMoreFlags/completion: probe series t0-t21 (macstudio
-    # /tmp/mnprobe11, xibs in macnib-work/probe11) + corpus points
-    # About direct/scroll, Crash, AL — fully orthogonal bits:
-    #   0x1|0x800 base; 0x2 editable (default YES); 0x4 richText != NO;
-    #   0x100 backgroundColor element present and drawsBackground != "NO";
-    #   0x200 smartInsertDelete; 0x4000000 spellingCorrection;
-    #   0x40000000 incrementalSearchingEnabled.
-    # NSMoreFlags 0x2 follows the charPicker attr; the completion key is
-    # TRUE unless a textCompletion attr archives false.
     rich = el.get("richText") != "NO"
     spell = el.get("spellingCorrection") == "YES"
     smart = el.get("smartInsertDelete") == "YES"
@@ -2820,7 +2804,31 @@ def _text_view(b, el, where, superview):
     sd.add("NSPreferredTextFinderStyle", *b.int8(0))
     sd.add("NSTextHighlightAttributes", *(N.NIL, None))
     sd.add("NSWritingToolsFlags", *int_fit(256))
+    return sd
 
+
+def _text_view(b, el, where, superview):
+    """<textView> (+ custom class) -> swapper with the text stack (oracle About)."""
+    o = b.new("NSClassSwapper" if el.get("customClass") else "NSTextView")
+    if el.get("customClass"):
+        o.add("NSClassName", *b.ref(b.string(I._swift_class(el))))
+        o.add("NSOriginalClassName", *b.ref(b.string("NSTextView")))
+    o.add("NSNextResponder", *(b.ref(superview) if superview is not None else (N.NIL, None)))
+    o.add("NSNibTouchBar", *(N.NIL, None))
+    v, vt = _vflags(el, where)
+    o.add("NSvFlags", vt, v)
+    r = el.find("rect[@key='frame']")
+    vert = el.get("verticallyResizable") == "YES"
+    if vert:
+        o.add("NSFrameSize", *b.ref(b.string("{%s, %s}" % (_fmt_g(r.get("width")),
+                                                           _fmt_g(r.get("height"))))))
+    else:
+        o.add("NSFrame", *b.ref(b.string(_rect(el, "frame", where))))
+    max_sz = el.find("size[@key='maxSize']")
+    max_s = "{%s, %s}" % (_fmt_g(max_sz.get("width")), _fmt_g(max_sz.get("height"))) \
+        if max_sz is not None else "{0, 0}"
+    tc, _lm = _text_stack(b, el, o, r)
+    sd = _text_shared_data(b, el, where)
     o.add("NSSuperview", *(b.ref(superview) if superview is not None else (N.NIL, None)))
     if el.get("wantsLayer") == "YES":
         o.add("NSViewIsLayerTreeHost", *b.boolean(False))
