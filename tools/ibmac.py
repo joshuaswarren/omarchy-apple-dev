@@ -3122,6 +3122,47 @@ def _color_ref(b, c_el, where):
         return b.custom_color(c_el, where)
     return b.catalog_color(c_el.get("catalog"), c_el.get("name"), where)
 
+def _button_priority_keys(b, el, o, btype):
+    """NSHuggingPriority: help writes iff (attr-or-default) differs from
+    (750,750) (probe CurrentActivity/Dinosaurs help 750/750 -> no key;
+    AccountStats 1000/1000 -> key); check/radio/bevel/smallSquare/roundRect
+    write whenever ANY hugging attr is present (probe TCV bevel v-only 750
+    -> key {250, 750}); push family writes iff differs from (250,750)
+    (probe ExportOPML eZ4 750/750 -> key, PPB v-only -> none).
+    NSAntiCompressionPriority only when a resistance attr differs from 750."""
+    h, v2 = el.get("horizontalHuggingPriority"), el.get("verticalHuggingPriority")
+    if btype == "help":
+        need = (h is not None and h != "750") or (v2 is not None and v2 != "750")
+    elif btype in ("check", "radio", "bevel", "smallSquare", "roundRect"):
+        need = h is not None or v2 is not None
+    else:
+        need = (h is not None and h != "250") or (v2 is not None and v2 != "750")
+    if need:
+        o.add("NSHuggingPriority",
+              *b.ref(b.string("{%s, %s}" % (_fmt_g(h or 250), _fmt_g(v2 or 750)))))
+    h, v2 = (el.get("horizontalCompressionResistancePriority"),
+             el.get("verticalCompressionResistancePriority"))
+    if (h is not None and h != "750") or (v2 is not None and v2 != "750"):
+        o.add("NSAntiCompressionPriority",
+              *b.ref(b.string("{%s, %s}" % (_fmt_g(h or 750), _fmt_g(v2 or 750)))))
+
+
+def _button_content_tint(b, el, cell, where):
+    """<color key='contentTintColor'> archives on the CELL (probe TCV [42]);
+    catalog=System -> catalog color, bare name -> <namedColor> resource
+    (probe AccountsFeedbin AccentColor)."""
+    tint = el.find("color[@key='contentTintColor']")
+    if tint is None:
+        return
+    if tint.get("catalog") == "System":
+        cell.add("NSContentTintColor",
+                 *b.ref(b.catalog_color("System", tint.get("name"), where)))
+    elif tint.get("catalog") is None and tint.get("name") in b.named_color_els:
+        cell.add("NSContentTintColor",
+                 *b.ref(b.named_color(tint.get("name"), where)))
+    else:
+        raise I.XibError(f"contentTintColor {tint.get('catalog')!r} not probed ({where})")
+
 
 def _button(b, el, where, superview, id_map, parent=None):
     """<button> -> NSButton with its NSButtonCell."""
@@ -3141,68 +3182,21 @@ def _button(b, el, where, superview, id_map, parent=None):
         o.add("NSDoNotTranslateAutoresizingMask", *b.boolean(False))
     # probe AccountsAddLocal Create button [59]: own <constraints> archive as
     # NSViewConstraints after NSDoNotTranslate, allocated before the cell
-    cons_el = el.find("constraints")
-    cons = []
-    if cons_el is not None and cons_el.findall("constraint"):
-        carr = b.new("NSArray")
-        carr.add("NSInlinedValue", *b.boolean(False))
-        els = I._constraint_order(el, cons_el.findall("constraint"), where, mac=True)
-        for c in els:
-            con = _constraint(b, c, o, el.get("id"), id_map, {}, {}, where)
-            carr.add("UINibEncoderEmptyKey", *b.ref(con))
-            cons.append(con)
-        b.cons_order[el.get("id")] = [c.get("id") for c in els]
-        o.add("NSViewConstraints", *b.ref(carr))
+    cons = _ordered_constraints(b, el, o, where, id_map)
     cell_el = el.find("buttonCell[@key='cell']")
     if cell_el is None:
         raise I.XibError(f"<button> without buttonCell ({where})")
     btype = cell_el.get("type", "momentaryPushIn")
-    # NSHuggingPriority: help writes iff (attr-or-default) differs from
-    # (750,750) (probe CurrentActivity/Dinosaurs help 750/750 -> no key;
-    # AccountStats 1000/1000 -> key); check/radio/bevel/smallSquare/roundRect
-    # write whenever ANY hugging attr is present (probe TCV bevel v-only 750
-    # -> key {250, 750}); push family writes iff differs from (250,750)
-    # (probe ExportOPML eZ4 750/750 -> key, PPB v-only -> none).
-    # NSAntiCompressionPriority only when a resistance attr differs from 750.
-    h, v2 = el.get("horizontalHuggingPriority"), el.get("verticalHuggingPriority")
-    if btype == "help":
-        need = (h is not None and h != "750") or (v2 is not None and v2 != "750")
-    elif btype in ("check", "radio", "bevel", "smallSquare", "roundRect"):
-        need = h is not None or v2 is not None
-    else:
-        need = (h is not None and h != "250") or (v2 is not None and v2 != "750")
-    if need:
-        o.add("NSHuggingPriority",
-              *b.ref(b.string("{%s, %s}" % (_fmt_g(h or 250), _fmt_g(v2 or 750)))))
-    h, v2 = (el.get("horizontalCompressionResistancePriority"),
-             el.get("verticalCompressionResistancePriority"))
-    if (h is not None and h != "750") or (v2 is not None and v2 != "750"):
-        o.add("NSAntiCompressionPriority",
-              *b.ref(b.string("{%s, %s}" % (_fmt_g(h or 750), _fmt_g(v2 or 750)))))
+    _button_priority_keys(b, el, o, btype)
     o.add("IBNSSafeAreaLayoutGuide", *(N.NIL, None))
     o.add("IBNSLayoutMarginsGuide", *(N.NIL, None))
     o.add("IBNSClipsToBounds", *b.int8(0))
     o.add("NSEnabled", *b.boolean(False))
-    cell_el = el.find("buttonCell[@key='cell']")
-    if cell_el is None:
-        raise I.XibError(f"<button> without buttonCell ({where})")
     cell = _button_cell(b, cell_el, o, where)
     o.add("NSCell", *b.ref(cell))
     id_map[el.get("id") + "#cell"] = cell
     id_map[cell_el.get("id")] = cell
-    tint = el.find("color[@key='contentTintColor']")
-    if tint is not None:
-        # <color> is a child of <button> but archives on the CELL (probe TCV [42]);
-        # catalog=System -> catalog color, bare name -> <namedColor> resource
-        # (probe AccountsFeedbin AccentColor)
-        if tint.get("catalog") == "System":
-            cell.add("NSContentTintColor",
-                     *b.ref(b.catalog_color("System", tint.get("name"), where)))
-        elif tint.get("catalog") is None and tint.get("name") in b.named_color_els:
-            cell.add("NSContentTintColor",
-                     *b.ref(b.named_color(tint.get("name"), where)))
-        else:
-            raise I.XibError(f"contentTintColor {tint.get('catalog')!r} not probed ({where})")
+    _button_content_tint(b, el, cell, where)
     o.add("NSAllowsLogicalLayoutDirection", *b.boolean(not b.localize))
     o.add("NSControlSize", *b.int8(0))
     if cell_el.get("controlSize") == "large":
