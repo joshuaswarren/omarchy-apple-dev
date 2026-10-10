@@ -1511,64 +1511,45 @@ class Generator:
             return re.sub(r"\$\([^)]*\)", "SET-BY-HAND", val)
         return val
 
-    def target_infoplan(self, layers, target_name, dev_region, extension):
-        """Builds the adapter Info.plist for one target (app or extension):
-        the project's INFOPLIST_FILE when present, plus INFOPLIST_KEY_* values
-        when GENERATE_INFOPLIST_FILE = YES (file keys win, as in Xcode), with
-        $(BUILD_SETTING) placeholders resolved in every string value; values
-        with $(AppIdentifierPrefix)/$(TeamIdentifierPrefix) keep those
-        placeholders (fill-team-prefix.py substitutes the signing team later),
-        values with other unresolvable settings and the executable/bundle-id
-        keys xtool owns are dropped.
-
-        Returns (plist, dropped_keys); the caller writes it."""
-        ipf = self.setting(layers, "INFOPLIST_FILE")
-        ipf_path = os.path.normpath(ipf) if ipf else None
-        if ipf and not os.path.isfile(os.path.join(self.proj_dir, ipf_path)):
-            self.warn(f"INFOPLIST_FILE {ipf!r} does not exist")
-            ipf_path = None
-        plist = {}
-        if ipf_path:
-            with open(os.path.join(self.proj_dir, ipf_path), "rb") as f:
-                plist = plistlib.load(f)
-        if self.setting(layers, "GENERATE_INFOPLIST_FILE") == "YES":
-            generated = {}
-            for l in layers:
-                for k, v in l.items():
-                    if not k.startswith("INFOPLIST_KEY_") or "[sdk=" in k:
-                        continue
-                    key = k[len("INFOPLIST_KEY_"):]
-                    v = self.expand(v, layers)
-                    if key.startswith("UISupportedInterfaceOrientations"):
-                        name = "UISupportedInterfaceOrientations~ipad" if \
-                            key.endswith("_iPad") else "UISupportedInterfaceOrientations"
-                        generated[name] = v.split()
-                    elif key == "UILaunchScreen_Generation" and v == "YES":
-                        generated["UILaunchScreen"] = {}
+    def _infoplan_generated_keys(self, layers, plist, ipf_path):
+        """Merge INFOPLIST_KEY_* build settings when GENERATE_INFOPLIST_FILE =
+        YES; file keys win, as in Xcode. Returns the merged plist."""
+        if self.setting(layers, "GENERATE_INFOPLIST_FILE") != "YES":
+            return plist
+        generated = {}
+        for l in layers:
+            for k, v in l.items():
+                if not k.startswith("INFOPLIST_KEY_") or "[sdk=" in k:
+                    continue
+                key = k[len("INFOPLIST_KEY_"):]
+                v = self.expand(v, layers)
+                if key.startswith("UISupportedInterfaceOrientations"):
+                    name = "UISupportedInterfaceOrientations~ipad" if \
+                        key.endswith("_iPad") else "UISupportedInterfaceOrientations"
+                    generated[name] = v.split()
+                elif key == "UILaunchScreen_Generation" and v == "YES":
+                    generated["UILaunchScreen"] = {}
+                else:
+                    # Xcode writes its Boolean-typed generated keys as plist
+                    # booleans (probe: NSSupportsLiveActivities => true).
+                    if key in BOOL_GENERATED_KEYS and v in ("YES", "NO"):
+                        generated[key] = v == "YES"
                     else:
-                        # Xcode writes its Boolean-typed generated keys as plist
-                        # booleans (probe: NSSupportsLiveActivities => true).
-                        if key in BOOL_GENERATED_KEYS and v in ("YES", "NO"):
-                            generated[key] = v == "YES"
-                        else:
-                            generated[key] = v
-            merged = dict(generated)
-            merged.update(plist)
-            plist = merged
-            if not ipf_path:
-                self.warn("wrote a minimal Info.plist from INFOPLIST_KEY_* settings; "
-                          "review it before shipping")
-        if not ipf_path and self.setting(layers, "GENERATE_INFOPLIST_FILE") != "YES":
-            if not extension:
-                self.warn("no Info.plist file and GENERATE_INFOPLIST_FILE != YES; "
-                          "xtool.yml gets no infoPath")
-                return None, []
+                        generated[key] = v
+        merged = dict(generated)
+        merged.update(plist)
+        if not ipf_path:
+            self.warn("wrote a minimal Info.plist from INFOPLIST_KEY_* settings; "
+                      "review it before shipping")
+        return merged
 
-        # Xcode writes UIDeviceFamily from TARGETED_DEVICE_FAMILY into every
-        # target's processed Info.plist (app and extensions alike), keeping only
-        # the iphoneos families: IceCubes' "1,2,7" becomes [1, 2] (7 = visionOS,
-        # which App Store rejects in an iOS bundle: ITMS-90100). Mac targets
-        # get no UIDeviceFamily.
+    def _infoplan_device_keys(self, plist, layers, target_name, extension):
+        """UIDeviceFamily from TARGETED_DEVICE_FAMILY (Xcode writes it into
+        every processed Info.plist, keeping only the iphoneos families: IceCubes'
+        "1,2,7" becomes [1, 2] (7 = visionOS, which App Store rejects in an iOS
+        bundle: ITMS-90100); Mac targets get none) and the WidgetKit extension
+        accent/background color names from the catalog settings (probe:
+        IceCubesAppWidgetsExtension)."""
         tdf_setting = self.setting(layers, "TARGETED_DEVICE_FAMILY")
         tdf = self.expand(tdf_setting, layers) if tdf_setting and \
             self.platform != "macos" else ""
@@ -1577,9 +1558,6 @@ class Generator:
                 plist["UIDeviceFamily"] = [f for f in (int(s) for s in tdf.split(",") if s.strip()) if f in (1, 2)]
             except ValueError:
                 self.warn(f"{target_name}: unresolvable TARGETED_DEVICE_FAMILY {tdf!r}")
-        # WidgetKit extensions: Xcode's actool run writes the accent and
-        # widget-background color names from the target's catalog settings
-        # into the extension's Info.plist (probe: IceCubesAppWidgetsExtension).
         if extension:
             accent = self.setting(layers, "ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME")
             if accent:
@@ -1588,6 +1566,8 @@ class Generator:
             if bg:
                 plist.setdefault("NSWidgetBackgroundColorName", bg)
 
+    def _infoplan_flat_settings(self, layers, target_name, dev_region, extension):
+        """The bottom settings layer every plist placeholder resolves against."""
         flat = {}
         for l in layers:
             for k, v in l.items():
@@ -1610,12 +1590,15 @@ class Generator:
                 g = self.expand(v, [flat])
                 if g.startswith("group.") and (orig + ".").startswith(g[6:] + "."):
                     flat[k] = f"group.{self.forced_bundle_id}"
+        return flat
 
+    def _infoplan_resolve_values(self, plist, flat, target_name):
+        """Expand $(...) placeholders in every string value. Team-prefix ones
+        stay literal because only the signing step knows the team; values with
+        other unresolvable settings are dropped. Returns dropped keys."""
         kept_prefixes = []
 
         def resolve(v, where):
-            """(value, kept) - expands placeholders; team-prefix ones stay
-            literal because only the signing step knows the team."""
             if isinstance(v, str):
                 nv = self.expand(v, [flat])
                 left = set(re.findall(r"\$\(([^)]+)\)", nv))
@@ -1640,27 +1623,68 @@ class Generator:
             else:
                 dropped.append(key)
                 del plist[key]
-        # Xcode names a target's Swift module from PRODUCT_MODULE_NAME; SwiftPM names it after the
-        # target. A class named "<Xcode module>.Class" in the plist then does not exist at run time
-        # (UIKit: "could not load class NetNewsWire.SceneDelegate", black screen), so point the
-        # class keys at the SwiftPM module.
+        if kept_prefixes:
+            self.warn(f"{target_name} Info.plist keeps {sorted(set(kept_prefixes))} with "
+                      "$(AppIdentifierPrefix)-style placeholders; fill-team-prefix.py "
+                      "fills them from the signing team before packaging")
+        return dropped
+
+    def _infoplan_rename_classes(self, plist, layers, flat):
+        """Xcode names a target's Swift module from PRODUCT_MODULE_NAME; SwiftPM
+        names it after the target. A class named "<Xcode module>.Class" in the
+        plist then does not exist at run time (UIKit: "could not load class
+        NetNewsWire.SceneDelegate", black screen), so point the class keys at
+        the SwiftPM module."""
         xcode_module = self.expand(self.setting(layers, "PRODUCT_MODULE_NAME") or "", layers)
         spm_module = flat["PRODUCT_MODULE_NAME"]
-        if xcode_module and xcode_module != spm_module:
-            class_keys = {"UISceneDelegateClassName", "NSPrincipalClass", "NSExtensionPrincipalClass"}
+        if not (xcode_module and xcode_module != spm_module):
+            return
+        class_keys = {"UISceneDelegateClassName", "NSPrincipalClass", "NSExtensionPrincipalClass"}
 
-            def rename_classes(node):
-                if isinstance(node, dict):
-                    for k, v in node.items():
-                        if k in class_keys and isinstance(v, str) and v.startswith(xcode_module + "."):
-                            node[k] = spm_module + v[len(xcode_module):]
-                        else:
-                            rename_classes(v)
-                elif isinstance(node, list):
-                    for item in node:
-                        rename_classes(item)
+        def rename_classes(node):
+            if isinstance(node, dict):
+                for k, v in node.items():
+                    if k in class_keys and isinstance(v, str) and v.startswith(xcode_module + "."):
+                        node[k] = spm_module + v[len(xcode_module):]
+                    else:
+                        rename_classes(v)
+            elif isinstance(node, list):
+                for item in node:
+                    rename_classes(item)
 
-            rename_classes(plist)
+        rename_classes(plist)
+
+    def target_infoplan(self, layers, target_name, dev_region, extension):
+        """Builds the adapter Info.plist for one target (app or extension):
+        the project's INFOPLIST_FILE when present, plus INFOPLIST_KEY_* values
+        when GENERATE_INFOPLIST_FILE = YES (file keys win, as in Xcode), with
+        $(BUILD_SETTING) placeholders resolved in every string value; values
+        with $(AppIdentifierPrefix)/$(TeamIdentifierPrefix) keep those
+        placeholders (fill-team-prefix.py substitutes the signing team later),
+        values with other unresolvable settings and the executable/bundle-id
+        keys xtool owns are dropped.
+
+        Returns (plist, dropped_keys); the caller writes it."""
+        ipf = self.setting(layers, "INFOPLIST_FILE")
+        ipf_path = os.path.normpath(ipf) if ipf else None
+        if ipf and not os.path.isfile(os.path.join(self.proj_dir, ipf_path)):
+            self.warn(f"INFOPLIST_FILE {ipf!r} does not exist")
+            ipf_path = None
+        plist = {}
+        if ipf_path:
+            with open(os.path.join(self.proj_dir, ipf_path), "rb") as f:
+                plist = plistlib.load(f)
+        plist = self._infoplan_generated_keys(layers, plist, ipf_path)
+        if not ipf_path and self.setting(layers, "GENERATE_INFOPLIST_FILE") != "YES":
+            if not extension:
+                self.warn("no Info.plist file and GENERATE_INFOPLIST_FILE != YES; "
+                          "xtool.yml gets no infoPath")
+                return None, []
+
+        self._infoplan_device_keys(plist, layers, target_name, extension)
+        flat = self._infoplan_flat_settings(layers, target_name, dev_region, extension)
+        dropped = self._infoplan_resolve_values(plist, flat, target_name)
+        self._infoplan_rename_classes(plist, layers, flat)
         xtool_owned = [k for k in ("CFBundleExecutable", "CFBundleIdentifier")
                        if k in plist]
         for k in xtool_owned:
@@ -1670,10 +1694,6 @@ class Generator:
                       "(the first two are set by xtool from the product name and "
                       "bundleID; the rest use build settings the generator cannot "
                       "resolve)")
-        if kept_prefixes:
-            self.warn(f"{target_name} Info.plist keeps {sorted(set(kept_prefixes))} with "
-                      "$(AppIdentifierPrefix)-style placeholders; fill-team-prefix.py "
-                      "fills them from the signing team before packaging")
         if extension and "NSExtension" not in plist:
             self.warn(f"{target_name} Info.plist has no NSExtension dictionary; "
                       "wrote an empty one - set NSExtensionPointIdentifier by hand")
