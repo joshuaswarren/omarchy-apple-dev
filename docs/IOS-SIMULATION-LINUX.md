@@ -108,7 +108,9 @@ A rung is done when its exit check is observed, not argued.
 
 ### M1 — a Mach-O arm64 hello from our toolchain runs on Linux
 
-Owned by a sibling lane, in progress on branch `machoload-m1`.
+Landed on branch `machoload-m1` (commit `a68df70`), proven under `qemu-aarch64-static`;
+the native arm64 run is staged and pending
+([receipt](../receipts/2026-10-10-machoload-m1.md)).
 
 - Entry checks:
   - The chroot toolchain emits a Mach-O arm64 executable. Already proven for device
@@ -116,14 +118,14 @@ Owned by a sibling lane, in progress on branch `machoload-m1`.
     `LC_SEGMENT_64 __TEXT` and `LC_MAIN`.
   - An arm64 Linux runner exists: `qemu-aarch64-static` on the build host, or the native
     arm64 Linux host.
-- Exit demo (expected shape):
+- Exit demo (observed, qemu):
   ```
-  $ llvm-objdump --macho --all-headers hello | grep -E 'LC_SEGMENT_64|LC_MAIN'
-  $ ./loader hello
-  hello from arm64 Mach-O
+  $ qemu-aarch64-static machoload/.build/loader machoload/.build/Hello
+  Hello from an iOS Mach-O on Linux
   $ echo $?
   0
   ```
+  Still open: the same pair on a native arm64 Linux host.
 - Cannot prove: dyld shared cache loading, the Objective-C runtime, any framework. A
   C-level hello only proves the loader and its syscall shims.
 
