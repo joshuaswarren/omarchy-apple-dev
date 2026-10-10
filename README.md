@@ -247,7 +247,6 @@ Then, from any tailnet host (`tailscale status` shows the phone's `100.x` addres
 | Cable out, Wi-Fi on, host on a different subnet than the phone | yes, same port after a Wi-Fi toggle |
 | Screen locked | yes (screenshot shows the lock screen) |
 | Wi-Fi off, cellular only | **no**: the phone closes the RemotePairing port |
-| Tailscale off on the phone | no |
 
 Details, the failure list with fixes, and the parked phone-side app note: [docs/OVER-TAILNET.md](docs/OVER-TAILNET.md).
 

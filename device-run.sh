@@ -353,11 +353,12 @@ rsd)
   ;;
 tailnet)
   # The tunnel lives as long as tailnet-tunnel.py (sudo relays the signal to it): stopped when this script exits.
+  sudo -v || { echo "--over-tailnet needs sudo for the TUN device" >&2; exit 1; }
   TT=$(mktemp)
   "$(dirname "$PMD3")/python" "$(dirname "$0")/tools/tailnet-tunnel.py" "$TAILNET_HOST" "${UDID_ARGS[@]}" >"$TT" 2>&1 &
   TTPID=$!
   trap 'kill "$TTPID" 2>/dev/null || true; rm -f "$TT"' EXIT
-  for _ in $(seq 30); do grep -q '^RSD ' "$TT" && break; sleep 1; done
+  for _ in $(seq 30); do grep -q '^RSD ' "$TT" && break; kill -0 "$TTPID" 2>/dev/null || break; sleep 1; done
   read -r _ RSD_HOST RSD_PORT < <(grep '^RSD ' "$TT") || { cat "$TT" >&2; exit 1; }
   echo "== Tunnel to $TAILNET_HOST up: RSD $RSD_HOST $RSD_PORT =="
   rsd_run

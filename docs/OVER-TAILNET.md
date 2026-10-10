@@ -58,7 +58,7 @@ For a signed app build: `./device-run.sh --over-tailnet 100.x.y.z path/to/App.ip
 | Cable in, Wi-Fi on | Works. Pair-verify, tunnel, info, apps, launch, screenshot, syslog. |
 | Cable out, Wi-Fi on, other subnet than the phone | Works. Same port (49152) before and after a Wi-Fi toggle. |
 | Cable out, Wi-Fi off, cellular + Tailscale | Fails. Port 49152 to 49167 refused; a scan of ports 1-1024 and 49152-65535 found one unrelated open port that does not answer RemotePairing. The phone itself answers `tailscale ping`. |
-| Screen locked, 2 minutes | Works. Screenshot shows the passcode screen; apps launch behind it. |
+| Screen locked (duration not recorded) | Works. Screenshot shows the passcode screen; apps launch behind it. |
 | Screen locked, 30 minutes | Not measured yet. |
 | `device-run.sh --over-tailnet App.ipa` | Works. Installs and launches a signed ipa, closes the tunnel on exit. |
 
@@ -71,8 +71,8 @@ Measured (cable out, Wi-Fi on): the tunnel carries `dvt launch --suspended`, `de
 when the local binary matches the installed build.
 
 Not yet shown: a stop at the breakpoint. Without the on-disk device sysroot, lldb reads every system library from process
-memory, and each 512-byte read crosses the tunnel; it had not reached `main` after 150 seconds. Fetch the sysroot once per
-iOS build (`pymobiledevice3 developer fetch-symbols download DIR --rsd ADDR PORT`, a few GB, then extract the Swift and
+memory, and those reads cross the tunnel; it had not reached `main` after 150 seconds. Fetch the sysroot once per
+iOS build (`pymobiledevice3 developer fetch-symbols download DIR --rsd ADDR PORT`, several GB; the cache for this build is 6.7 GB, then extract the Swift and
 Objective-C dylibs as `device-run.sh --lldb` does) and rerun. The result of that run goes in the receipt.
 
 Always end a debug session by killing the app (`developer dvt pkill --bundle BUNDLE_ID --rsd ADDR PORT`) so the phone is not

@@ -2,7 +2,7 @@
 
 2026-10-10. iPhone 15 Pro Max (iPhone16,2), iOS 27.0.1 (24A446), pymobiledevice3 11.23.0. Two Linux hosts on the
 same tailnet as the phone: an M1 Max laptop (Python 3.14) and a build container (Python 3.14 venv). Neither host is on the
-phone's subnet.
+phone's subnet. A third Linux laptop on the phone's subnet served only as the control sender in the raw probe.
 
 ## Finding
 
