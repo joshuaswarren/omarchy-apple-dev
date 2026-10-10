@@ -2870,6 +2870,96 @@ def _scroller(b, el, where, scroll):
     o.add("NSAction", *b.ref(b.string("_doScroller:")))
     return o
 
+def _ordered_constraints(b, el, o, where, id_map):
+    """Element-ordered NSViewConstraints, all freshly built; returns them."""
+    cons_el = el.find("constraints")
+    cons = []
+    if cons_el is not None and cons_el.findall("constraint"):
+        carr = b.new("NSArray")
+        carr.add("NSInlinedValue", *b.boolean(False))
+        els = I._constraint_order(el, cons_el.findall("constraint"), where, mac=True)
+        for c in els:
+            con = _constraint(b, c, o, el.get("id"), id_map, {}, {}, where)
+            carr.add("UINibEncoderEmptyKey", *b.ref(con))
+            cons.append(con)
+        b.cons_order[el.get("id")] = [c.get("id") for c in els]
+        o.add("NSViewConstraints", *b.ref(carr))
+    return cons
+
+
+def _scroll_doc_view(b, el, cv_el, cv, where, id_map, carr):
+    """Build (or reuse) the clip view's single document view: the owner's
+    textView/tableView outlet may have built it lazily before the scroll view
+    (probe CrashReporter / TimelineTableView: one stack, reused doc).
+    Returns (doc, doc_el, is_table)."""
+    subs = cv_el.find("subviews")
+    doc_els = list(subs) if subs is not None else []
+    if len(doc_els) != 1:
+        raise I.XibError(f"<clipView> without exactly one subview ({where})")
+    doc_el = doc_els[0]
+    is_table = doc_el.tag in ("tableView", "outlineView")
+    if is_table:
+        # xibs may hang the headerView off the scrollView (probe
+        # CurrentActivity); the table build owns it either way
+        hv_out = el.find("tableHeaderView[@key='headerView']")
+        if hv_out is not None and doc_el.find("tableHeaderView[@key='headerView']") is None:
+            doc_el.append(hv_out)
+    if doc_el.tag == "textView":
+        doc = id_map.get(doc_el.get("id"))
+        if doc is None:
+            doc = _text_view(b, doc_el, where, cv)
+            id_map[doc_el.get("id")] = doc
+    elif is_table:
+        doc = id_map.get(doc_el.get("id"))
+        if doc is None:
+            doc, _doc_pairs = _table_view(b, doc_el, where, cv, id_map, parent=cv)
+    else:
+        raise I.XibError(f"clipView subview <{doc_el.tag}> not probed ({where})")
+    carr.add("UINibEncoderEmptyKey", *b.ref(doc))
+    return doc, doc_el, is_table
+
+
+def _scroll_header_clip(b, o, arr, hv_el):
+    """The header clip view wrapping a table's headerView; joins the scroll
+    view's subviews (probe CurrentActivity [19])."""
+    hr = hv_el.find("rect[@key='frame']")
+    hclip = b.new("NSClipView")
+    hclip.add("NSNextResponder", *b.ref(o))
+    hclip.add("NSNibTouchBar", *(N.NIL, None))
+    hclip.add("NSvFlags", N.INT16, 256)
+    harr = b.new("NSMutableArray")
+    harr.add("NSInlinedValue", *b.boolean(False))
+    hclip.add("NSSubviews", *b.ref(harr))
+    hclip.add("NSFrameSize", *b.ref(b.string(
+        "{%s, %s}" % (_fmt_g(hr.get("width")), _fmt_g(hr.get("height"))))))
+    hclip.add("NSSuperview", *b.ref(o))
+    hclip.add("NSNextKeyView", *b.ref(id_map[hv_el.get("id")]))
+    hclip.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
+    hclip.add("IBNSSafeAreaLayoutGuide", *(N.NIL, None))
+    hclip.add("IBNSLayoutMarginsGuide", *(N.NIL, None))
+    hclip.add("IBNSClipsToBounds", *b.int8(0))
+    hclip.add("NSDocView", *b.ref(id_map[hv_el.get("id")]))
+    hclip.add("NSAutomaticallyAdjustsContentInsets", *b.boolean(False))
+    harr.add("UINibEncoderEmptyKey", *b.ref(id_map[hv_el.get("id")]))
+    arr.add("UINibEncoderEmptyKey", *b.ref(hclip))
+    # patch the header view's forward references to this clip
+    doc._hdr_late.obj = hclip
+    return hclip
+
+
+def _pan_gesture(b, o):
+    gest = b.new("NSArray")
+    gest.add("NSInlinedValue", *b.boolean(False))
+    pan = b.new("NSPanGestureRecognizer")
+    pan.add("NSGestureRecognizer.allowedTouchTypes", *b.int8(1))
+    pan.add("NSGestureRecognizer.action", *b.ref(b.string("_panWithGestureRecognizer:")))
+    pan.add("NSGestureRecognizer.target", *b.ref(o))
+    pan.add("NSGestureRecognizer.delegate", *b.ref(o))
+    pan.add("NSPanGestureRecognizer.buttonMask", *b.int8(0))
+    pan.add("NSPanGestureRecognizer.numberOfTouchesRequired", *b.int8(1))
+    gest.add("UINibEncoderEmptyKey", *b.ref(pan))
+    o.add("NSGestureRecognizers", *b.ref(gest))
+
 
 def _scroll_view(b, el, where, superview, id_map, parent=None):
     """<scrollView> -> NSScrollView + NSClipView + scrollers + pan gesture."""
@@ -2901,36 +2991,8 @@ def _scroll_view(b, el, where, superview, id_map, parent=None):
     carr = b.new("NSMutableArray")
     carr.add("NSInlinedValue", *b.boolean(False))
     cv.add("NSSubviews", *b.ref(carr))
-    doc = None
-    subs = cv_el.find("subviews")
-    doc_els = list(subs) if subs is not None else []
-    if len(doc_els) != 1:
-        raise I.XibError(f"<clipView> without exactly one subview ({where})")
-    doc_el = doc_els[0]
-    is_table = doc_el.tag in ("tableView", "outlineView")
-    if is_table:
-        # xibs may hang the headerView off the scrollView (probe
-        # CurrentActivity); the table build owns it either way
-        hv_out = el.find("tableHeaderView[@key='headerView']")
-        if hv_out is not None and doc_el.find("tableHeaderView[@key='headerView']") is None:
-            doc_el.append(hv_out)
-    if doc_el.tag == "textView":
-        # the owner's textView outlet may have built it lazily before the
-        # scroll view (probe CrashReporter: one text stack, reused doc)
-        doc = id_map.get(doc_el.get("id"))
-        if doc is None:
-            doc = _text_view(b, doc_el, where, cv)
-            id_map[doc_el.get("id")] = doc
-    elif is_table:
-        # the owner's tableView outlet may have built it lazily before the
-        # scroll view (probe TimelineTableView: one table, reused doc)
-        doc = id_map.get(doc_el.get("id"))
-        if doc is None:
-            doc, _doc_pairs = _table_view(b, doc_el, where, cv, id_map, parent=cv)
-    else:
-        raise I.XibError(f"clipView subview <{doc_el.tag}> not probed ({where})")
+    doc, doc_el, is_table = _scroll_doc_view(b, el, cv_el, cv, where, id_map, carr)
     arr.add("UINibEncoderEmptyKey", *b.ref(cv))
-    carr.add("UINibEncoderEmptyKey", *b.ref(doc))
     r = cv_el.find("rect[@key='frame']")
     # probe CrashReporter golden [88]: a clipView with a non-zero xib origin
     # (borderType=line 1px inset) archives NSFrame, zero-origin keeps
@@ -2956,30 +3018,7 @@ def _scroll_view(b, el, where, superview, id_map, parent=None):
     cv.add("IBNSClipsToBounds", *b.int8(0))
     cv.add("NSDocView", *b.ref(doc))
     hv_el = doc_el.find("tableHeaderView[@key='headerView']") if is_table else None
-    if hv_el is not None:
-        hr = hv_el.find("rect[@key='frame']")
-        hclip = b.new("NSClipView")
-        hclip.add("NSNextResponder", *b.ref(o))
-        hclip.add("NSNibTouchBar", *(N.NIL, None))
-        hclip.add("NSvFlags", N.INT16, 256)
-        harr = b.new("NSMutableArray")
-        harr.add("NSInlinedValue", *b.boolean(False))
-        hclip.add("NSSubviews", *b.ref(harr))
-        hclip.add("NSFrameSize", *b.ref(b.string(
-            "{%s, %s}" % (_fmt_g(hr.get("width")), _fmt_g(hr.get("height"))))))
-        hclip.add("NSSuperview", *b.ref(o))
-        hclip.add("NSNextKeyView", *b.ref(id_map[hv_el.get("id")]))
-        hclip.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
-        hclip.add("IBNSSafeAreaLayoutGuide", *(N.NIL, None))
-        hclip.add("IBNSLayoutMarginsGuide", *(N.NIL, None))
-        hclip.add("IBNSClipsToBounds", *b.int8(0))
-        hclip.add("NSDocView", *b.ref(id_map[hv_el.get("id")]))
-        hclip.add("NSAutomaticallyAdjustsContentInsets", *b.boolean(False))
-        harr.add("UINibEncoderEmptyKey", *b.ref(id_map[hv_el.get("id")]))
-        # the header clip joins the scroll view's subviews (probe CurrentActivity [19])
-        arr.add("UINibEncoderEmptyKey", *b.ref(hclip))
-        # patch the header view's forward references to this clip
-        doc._hdr_late.obj = hclip
+    hclip = _scroll_header_clip(b, o, arr, hv_el) if hv_el is not None else None
     cv_flags = (0 if cv_el.get("drawsBackground") == "NO" else 4) \
         + (2 if cv_el.get("copiesOnScroll") == "NO" else 0)
     bg_el = cv_el.find("color[@key='backgroundColor']")
@@ -3017,29 +3056,8 @@ def _scroll_view(b, el, where, superview, id_map, parent=None):
     o.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
     if _translates(el):
         o.add("NSDoNotTranslateAutoresizingMask", *b.boolean(False))
-    cons_el = el.find("constraints")
-    scons = []
-    if cons_el is not None and cons_el.findall("constraint"):
-        carr2 = b.new("NSArray")
-        carr2.add("NSInlinedValue", *b.boolean(False))
-        els = I._constraint_order(el, cons_el.findall("constraint"), where, mac=True)
-        for c in els:
-            con = _constraint(b, c, o, el.get("id"), id_map, {}, {}, where)
-            carr2.add("UINibEncoderEmptyKey", *b.ref(con))
-            scons.append(con)
-        b.cons_order[el.get("id")] = [c.get("id") for c in els]
-        o.add("NSViewConstraints", *b.ref(carr2))
-    gest = b.new("NSArray")
-    gest.add("NSInlinedValue", *b.boolean(False))
-    pan = b.new("NSPanGestureRecognizer")
-    pan.add("NSGestureRecognizer.allowedTouchTypes", *b.int8(1))
-    pan.add("NSGestureRecognizer.action", *b.ref(b.string("_panWithGestureRecognizer:")))
-    pan.add("NSGestureRecognizer.target", *b.ref(o))
-    pan.add("NSGestureRecognizer.delegate", *b.ref(o))
-    pan.add("NSPanGestureRecognizer.buttonMask", *b.int8(0))
-    pan.add("NSPanGestureRecognizer.numberOfTouchesRequired", *b.int8(1))
-    gest.add("UINibEncoderEmptyKey", *b.ref(pan))
-    o.add("NSGestureRecognizers", *b.ref(gest))
+    scons = _ordered_constraints(b, el, o, where, id_map)
+    _pan_gesture(b, o)
     o.add("IBNSSafeAreaLayoutGuide", *(N.NIL, None))
     o.add("IBNSLayoutMarginsGuide", *(N.NIL, None))
     o.add("IBNSClipsToBounds", *b.int8(0))
@@ -3051,7 +3069,7 @@ def _scroll_view(b, el, where, superview, id_map, parent=None):
         o.add("NSHScroller", *b.ref(hs))
         id_map[h_el.get("id")] = hs
     o.add("NSContentView", *b.ref(cv))
-    if hv_el is not None:
+    if hclip is not None:
         o.add("NSHeaderClipView", *b.ref(hclip))
     hls = float(el.get("horizontalLineScroll", 10))
     vls = float(el.get("verticalLineScroll", 10))
