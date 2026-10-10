@@ -490,7 +490,7 @@ elif ! command -v pacman >/dev/null 2>&1; then
   echo "== 1-2. No pacman: skipping the Arch package steps (other distributions: docs/DISTROS.md)."
   echo "Put a swift.org toolchain on PATH first, e.g.:"
   echo "  curl -fsSL https://download.swift.org/swift-6.4.0-release/ubuntu2404/swift-6.4.0-RELEASE/swift-6.4.0-RELEASE-ubuntu24.04.tar.gz -o swift.tar.gz"
-  echo "  sudo tar -xzf swift.tar.gz -C /usr/local --strip-components=1 && hash -r"
+  echo "  sudo tar -xzf swift.tar.gz -C /usr/local && export PATH=/usr/local/usr/bin:\$PATH && hash -r"
   warn_user_tools
 else
 echo "== 1. usbmuxd (device multiplexer; udev starts it on plug), zip, xtool build deps =="
