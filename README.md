@@ -71,7 +71,7 @@ Flutter support is the work of [dl-alexandre](https://github.com/dl-alexandre)
 ([#8](https://github.com/joshuaswarren/omarchy-apple-dev/pull/8)) and plugin
 package support ([#9](https://github.com/joshuaswarren/omarchy-apple-dev/pull/9)).
 
-## What you need
+## What you need (full mode)
 
 - An Apple Silicon or x86_64 Linux box running Omarchy (Arch-based). Both
   architectures are covered: AUR `swift-bin` ships aarch64 and x86_64, and the
