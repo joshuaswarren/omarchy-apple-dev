@@ -14,4 +14,7 @@ struct tm *gmtime_r(const time_t *, struct tm *);
 time_t mktime(struct tm *);
 size_t strftime(char *, size_t, const char *, const struct tm *);
 int nanosleep(const struct timespec *, struct timespec *);
+int clock_gettime(int clock_id, struct timespec *tp);
+#define CLOCK_REALTIME 0
+#define CLOCK_MONOTONIC 1
 #define CLOCKS_PER_SEC 1000000
