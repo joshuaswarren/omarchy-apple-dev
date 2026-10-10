@@ -1213,95 +1213,25 @@ def lb_of(cell_el):
 
 
 
+def _add_subview_elements(b, elements, o, where, id_map, guides, keys):
+    """Build each subview (depth-first, cell included), reusing ones another
+    branch already built; appends the subview to o's NSSubviews array."""
+    arr = b.new("NSMutableArray")
+    arr.add("NSInlinedValue", *b.boolean(False))
+    o.add("NSSubviews", *b.ref(arr))
+    for child in elements:
+        existing = id_map.get(child.get("id"))
+        if existing is not None:
+            arr.add("UINibEncoderEmptyKey", *b.ref(existing))
+            continue
+        sub, sub_pairs = _build_element(b, child, where, superview=o,
+                                        id_map=id_map, guides=guides, parent=o)
+        arr.add("UINibEncoderEmptyKey", *b.ref(sub))
+        keys.extend(sub_pairs)
 
-def _view(b, el, where, superview=None, id_map=None, guides=None, parent=None,
-          root=False):
-    """<view>/<customView> -> NSView or NSClassSwapper; returns (obj, pairs).
 
-    Allocation order is Apple's: the object, then subviews depth-first (each
-    subview completes, cell included), then this view's frame, constraints
-    (probe-ordered), layout guides, IB guide placeholders."""
-    guide_kinds = {}
-    is_custom = el.tag == "customView" or el.get("customClass")
-    o = b.new("NSStackView" if el.tag == "stackView"
-              else "NSGridView" if el.tag == "gridView"
-              else "NSClassSwapper" if is_custom else "NSView")
-    if is_custom:
-        # probe NNW3OpenPanelAccessoryView: bare <customView> (no customClass)
-        # archives as NSClassSwapper with NSView/NSView; with customClass the
-        # mangled name + NSView
-        o.add("NSClassName", *b.ref(b.string(I._swift_class(el) or "NSView")))
-        o.add("NSOriginalClassName", *b.ref(b.string("NSView")))
-    o.add("NSNextResponder", *(b.ref(superview) if superview is not None else (N.NIL, None)))
-    o.add("NSNibTouchBar", *(N.NIL, None))
-    v, vt = _vflags(el, where)
-    o.add("NSvFlags", vt, v)
-    id_map[el.get("id")] = o
-    keys = [(o, parent)]
-    if el.tag == "gridView":
-        # gridCell contentView elements are the subview source (probe
-        # AccountsFeedbin [107]: doc order, grid is NSNextResponder)
-        arr = b.new("NSMutableArray")
-        arr.add("NSInlinedValue", *b.boolean(False))
-        o.add("NSSubviews", *b.ref(arr))
-        for c_el in el.findall("gridCells/gridCell"):
-            content_el = c_el.find("*[@key='contentView']")
-            if content_el is None:
-                raise I.XibError(f"<gridCell> without contentView ({where})")
-            existing = id_map.get(content_el.get("id"))
-            if existing is not None:
-                arr.add("UINibEncoderEmptyKey", *b.ref(existing))
-                continue
-            sub, sub_pairs = _build_element(b, content_el, where, superview=o,
-                                            id_map=id_map, guides=guides, parent=o)
-            arr.add("UINibEncoderEmptyKey", *b.ref(sub))
-            keys.extend(sub_pairs)
-        subs = None
-    else:
-        subs = el.find("subviews")
-    if subs is not None:
-        arr = b.new("NSMutableArray")
-        arr.add("NSInlinedValue", *b.boolean(False))
-        o.add("NSSubviews", *b.ref(arr))
-        for child in subs:
-            existing = id_map.get(child.get("id"))
-            if existing is not None:
-                arr.add("UINibEncoderEmptyKey", *b.ref(existing))
-                continue
-            sub, sub_pairs = _build_element(b, child, where, superview=o,
-                                            id_map=id_map, guides=guides, parent=o)
-            arr.add("UINibEncoderEmptyKey", *b.ref(sub))
-            keys.extend(sub_pairs)
-    if superview is None:
-        # ibtool archives the constraint-SOLVED canvas frame here; xibs whose
-        # saved frames match the solved layout reproduce byte-for-byte, stale
-        # ones differ in the frame strings only (loads identically: Auto Layout
-        # re-fits at runtime).
-        r = getattr(b, "cv_rect", None)
-        if r is not None:
-            cr = getattr(b, "cv_content_rect", None)
-            rw, rh = float(r.get("width")), float(r.get("height"))
-            if cr is None:
-                o.add("NSFrameSize", *b.ref(b.string(_size_str(el))))
-            elif (rw, rh) == cr:
-                o.add("NSFrameSize", *b.ref(b.string(
-                    "{%s, %s}" % (_fmt_g(cr[0]), _fmt_g(cr[1])))))
-            elif rw == cr[0]:
-                # canvas with equal widths: frame shifted by the height delta
-                o.add("NSFrame", *b.ref(b.string(
-                    "{{0, %s}, {%s, %s}}" % (_fmt_g(cr[1] - rh),
-                                             _fmt_g(cr[0]), _fmt_g(rh)))))
-            elif rh == cr[1]:
-                o.add("NSFrameSize", *b.ref(b.string(
-                    "{%s, %s}" % (_fmt_g(rw), _fmt_g(cr[1])))))
-            else:
-                o.add("NSFrameSize", *b.ref(b.string(
-                    "{%s, %s}" % (_fmt_g(cr[0]), _fmt_g(cr[1])))))
-        else:
-            o.add("NSFrameSize", *b.ref(b.string(_size_str(el))))
-        if el.get("wantsLayer") == "YES":
-            o.add("NSViewIsLayerTreeHost", *b.boolean(False))
-    else:
+def _view_frame(b, el, o, where, superview):
+    if superview is not None:
         r = el.find("rect[@key='frame']")
         zero = r is not None and r.get("x", "0") in ("0", "0.0") and r.get("y", "0") in ("0", "0.0")
         o.add("NSFrameSize" if zero else "NSFrame",
@@ -1309,11 +1239,40 @@ def _view(b, el, where, superview=None, id_map=None, guides=None, parent=None,
         o.add("NSSuperview", *b.ref(superview))
         if el.get("wantsLayer") == "YES":
             o.add("NSViewIsLayerTreeHost", *b.boolean(False))
-    if el.get("alphaValue") is not None:
-        o.add("NSViewAlphaValue", *b.float64(float(el.get("alphaValue"))))
-    o.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
-    if superview is not None and _translates(el):
-        o.add("NSDoNotTranslateAutoresizingMask", *b.boolean(False))
+        return
+    # ibtool archives the constraint-SOLVED canvas frame here; xibs whose
+    # saved frames match the solved layout reproduce byte-for-byte, stale
+    # ones differ in the frame strings only (loads identically: Auto Layout
+    # re-fits at runtime).
+    r = getattr(b, "cv_rect", None)
+    if r is not None:
+        cr = getattr(b, "cv_content_rect", None)
+        rw, rh = float(r.get("width")), float(r.get("height"))
+        if cr is None:
+            o.add("NSFrameSize", *b.ref(b.string(_size_str(el))))
+        elif (rw, rh) == cr:
+            o.add("NSFrameSize", *b.ref(b.string(
+                "{%s, %s}" % (_fmt_g(cr[0]), _fmt_g(cr[1])))))
+        elif rw == cr[0]:
+            # canvas with equal widths: frame shifted by the height delta
+            o.add("NSFrame", *b.ref(b.string(
+                "{{0, %s}, {%s, %s}}" % (_fmt_g(cr[1] - rh),
+                                         _fmt_g(cr[0]), _fmt_g(rh)))))
+        elif rh == cr[1]:
+            o.add("NSFrameSize", *b.ref(b.string(
+                "{%s, %s}" % (_fmt_g(rw), _fmt_g(cr[1])))))
+        else:
+            o.add("NSFrameSize", *b.ref(b.string(
+                "{%s, %s}" % (_fmt_g(cr[0]), _fmt_g(cr[1])))))
+    else:
+        o.add("NSFrameSize", *b.ref(b.string(_size_str(el))))
+    if el.get("wantsLayer") == "YES":
+        o.add("NSViewIsLayerTreeHost", *b.boolean(False))
+
+
+def _view_constraints_and_guides(b, el, o, where, id_map, guides, keys):
+    """Constraints (probe-ordered), hugging/anti-compression priorities and
+    the layout guides; appends constraint key pairs. Returns guide_kinds."""
     cons_el = el.find("constraints")
     cons = []
     gl = el.findall("viewLayoutGuide")
@@ -1366,132 +1325,187 @@ def _view(b, el, where, superview=None, id_map=None, guides=None, parent=None,
         o.add("IBNSSafeAreaLayoutGuide", *(N.NIL, None))
         o.add("IBNSLayoutMarginsGuide", *(N.NIL, None))
     o.add("IBNSClipsToBounds", *b.int8(0))
-    if el.tag == "stackView":
-        # probe AccountsAddLocal [55]/[57] (empty stacks), ShareViewController
-        # [11] (arranged subviews + NSStackViewBeginningContainer)
-        align = el.get("alignment")
-        stack_align = {"bottom": 4, "centerY": 10, "firstBaseline": 12}.get(align)
-        if stack_align is None:
-            raise I.XibError(f"stackView alignment {align!r} not probed ({where})")
-        if el.get("orientation") not in ("horizontal", "vertical"):
-            raise I.XibError(f"stackView orientation {el.get('orientation')!r} "
-                             f"not probed ({where})")
-        if el.get("distribution", "fill") != "fill":
-            raise I.XibError(f"stackView distribution "
-                             f"{el.get('distribution')!r} not probed ({where})")
-        o.add("NSStackViewOrientation",
-              *b.int8(0 if el.get("orientation") == "horizontal" else 1))
-        o.add("NSStackViewSecondaryAlignment",
-              *b.int8({"centerY": 3, "bottom": 4, "firstBaseline": 2}[align]))
-        o.add("NSStackViewAlignment", *b.int8(stack_align))
-        o.add("NSStackViewVerticalClippingResistance", *b.float32(
-            float(el.get("verticalCompressionResistancePriority", 1000))))
-        o.add("NSStackViewHorizontalClippingResistance", *b.float32(
-            float(el.get("horizontalCompressionResistancePriority", 1000))))
-        o.add("NSStackViewVerticalHugging", *b.float32(
-            float(el.get("verticalStackHuggingPriority", 250))))
-        o.add("NSStackViewHorizontalHugging", *b.float32(
-            float(el.get("horizontalStackHuggingPriority", 250))))
-        o.add("NSStackViewSpacing", *b.float32(float(el.get("spacing", 8))))
-        o.add("NSStackViewdistribution", *b.int8(0))
-        for edge in ("top", "left", "right", "bottom"):
-            o.add(f"NSStackViewEdgeInsets.{edge}", *b.float32(0.0))
-        if subs is not None:
-            # container allocated after the arranged subviews' subtrees and the
-            # stack frame string (golden ShareVC [61] after [60])
-            cont = b.new("NSStackViewContainer")
-            cont.add("NSNextResponder", *(N.NIL, None))
-            cont.add("NSNibTouchBar", *(N.NIL, None))
-            cont.add("NSvFlags", *b.int16(256))
-            cont.add("NSFrameSize", *b.ref(b.string("{0, 0}")))
-            cont.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
-            cont.add("NSDoNotTranslateAutoresizingMask", *b.boolean(False))
-            cont.add("IBNSSafeAreaLayoutGuide", *(N.NIL, None))
-            cont.add("IBNSLayoutMarginsGuide", *(N.NIL, None))
-            cont.add("IBNSClipsToBounds", *b.int8(0))
-            cont.add("NSStackViewContainerStackView", *b.ref(o))
-            cont.add("NSStackViewContainerViewToCustomAfterSpaceMap", *(N.NIL, None))
-            cont.add("NSStackViewContainerVisibilityPriorities", *(N.NIL, None))
-            ndv = b.new("NSMutableArray")
-            ndv.add("NSInlinedValue", *b.boolean(False))
-            cont.add("NSStackViewContainerNonDroppedViews", *b.ref(ndv))
-            for child in subs:
-                ndv.add("UINibEncoderEmptyKey", *b.ref(id_map[child.get("id")]))
-            o.add("NSStackViewBeginningContainer", *b.ref(cont))
-        # probe: xib detachesHiddenViews="YES" archives False (inverted)
-        o.add("NSStackViewDetachesHiddenViews",
-              *b.boolean(el.get("detachesHiddenViews") != "YES"))
-        o.add("NSStackViewHasFlatViewHierarchy", *b.boolean(False))
+    return guide_kinds
+
+
+def _stack_view_extras(b, el, o, where, subs):
+    # probe AccountsAddLocal [55]/[57] (empty stacks), ShareViewController
+    # [11] (arranged subviews + NSStackViewBeginningContainer)
+    align = el.get("alignment")
+    stack_align = {"bottom": 4, "centerY": 10, "firstBaseline": 12}.get(align)
+    if stack_align is None:
+        raise I.XibError(f"stackView alignment {align!r} not probed ({where})")
+    if el.get("orientation") not in ("horizontal", "vertical"):
+        raise I.XibError(f"stackView orientation {el.get('orientation')!r} "
+                         f"not probed ({where})")
+    if el.get("distribution", "fill") != "fill":
+        raise I.XibError(f"stackView distribution "
+                         f"{el.get('distribution')!r} not probed ({where})")
+    o.add("NSStackViewOrientation",
+          *b.int8(0 if el.get("orientation") == "horizontal" else 1))
+    o.add("NSStackViewSecondaryAlignment",
+          *b.int8({"centerY": 3, "bottom": 4, "firstBaseline": 2}[align]))
+    o.add("NSStackViewAlignment", *b.int8(stack_align))
+    o.add("NSStackViewVerticalClippingResistance", *b.float32(
+        float(el.get("verticalCompressionResistancePriority", 1000))))
+    o.add("NSStackViewHorizontalClippingResistance", *b.float32(
+        float(el.get("horizontalCompressionResistancePriority", 1000))))
+    o.add("NSStackViewVerticalHugging", *b.float32(
+        float(el.get("verticalStackHuggingPriority", 250))))
+    o.add("NSStackViewHorizontalHugging", *b.float32(
+        float(el.get("horizontalStackHuggingPriority", 250))))
+    o.add("NSStackViewSpacing", *b.float32(float(el.get("spacing", 8))))
+    o.add("NSStackViewdistribution", *b.int8(0))
+    for edge in ("top", "left", "right", "bottom"):
+        o.add(f"NSStackViewEdgeInsets.{edge}", *b.float32(0.0))
+    if subs is not None:
+        # container allocated after the arranged subviews' subtrees and the
+        # stack frame string (golden ShareVC [61] after [60])
+        cont = b.new("NSStackViewContainer")
+        cont.add("NSNextResponder", *(N.NIL, None))
+        cont.add("NSNibTouchBar", *(N.NIL, None))
+        cont.add("NSvFlags", *b.int16(256))
+        cont.add("NSFrameSize", *b.ref(b.string("{0, 0}")))
+        cont.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
+        cont.add("NSDoNotTranslateAutoresizingMask", *b.boolean(False))
+        cont.add("IBNSSafeAreaLayoutGuide", *(N.NIL, None))
+        cont.add("IBNSLayoutMarginsGuide", *(N.NIL, None))
+        cont.add("IBNSClipsToBounds", *b.int8(0))
+        cont.add("NSStackViewContainerStackView", *b.ref(o))
+        cont.add("NSStackViewContainerViewToCustomAfterSpaceMap", *(N.NIL, None))
+        cont.add("NSStackViewContainerVisibilityPriorities", *(N.NIL, None))
+        ndv = b.new("NSMutableArray")
+        ndv.add("NSInlinedValue", *b.boolean(False))
+        cont.add("NSStackViewContainerNonDroppedViews", *b.ref(ndv))
+        for child in subs:
+            ndv.add("UINibEncoderEmptyKey", *b.ref(id_map[child.get("id")]))
+        o.add("NSStackViewBeginningContainer", *b.ref(cont))
+    # probe: xib detachesHiddenViews="YES" archives False (inverted)
+    o.add("NSStackViewDetachesHiddenViews",
+          *b.boolean(el.get("detachesHiddenViews") != "YES"))
+    o.add("NSStackViewHasFlatViewHierarchy", *b.boolean(False))
+
+
+def _grid_view_extras(b, el, o, where, id_map):
+    # probe AccountsFeedbin [106..128]: contents build as plain subviews
+    # (gridCell doc order), then grid scaffolding after the frame
+    XP = {"trailing": 3, "leading": 2}
+    o.add("NSGrid_rowSpacing", *b.float64(float(el.get("rowSpacing", 0))))
+    o.add("NSGrid_columnSpacing", *b.float64(float(el.get("columnSpacing", 0))))
+    o.add("NSGrid_xPlacement", *b.int8(XP.get(el.get("xPlacement"), 0)))
+    o.add("NSGrid_yPlacement", *b.int8({"center": 4}.get(el.get("yPlacement"), 0)))
+    o.add("NSGrid_alignment", *b.int8({"none": 1}.get(el.get("rowAlignment"), 0)))
+    FLT_MIN = 1.1754943508222875e-38
+    cols = {c.get("id"): c for c in el.findall("columns/gridColumn")}
+    rarr = b.new("NSMutableArray")
+    rarr.add("NSInlinedValue", *b.boolean(False))
+    o.add("NSGrid_rows", *b.ref(rarr))
+    col_objs = {}
+    row_objs = []
+    cell_of = {}
+    for r_el in el.findall("rows/gridRow"):
+        row = b.new("NSGridRow")
+        row_objs.append(row)
+        rarr.add("UINibEncoderEmptyKey", *b.ref(row))
+        row.add("NSGrid_owningGrid", *b.ref(o))
+        row.add("NSGrid_yPlacement", *b.int8(0))
+        row.add("NSGrid_alignment", *b.int8(0))
+        row.add("NSGrid_height", *b.float64(FLT_MIN))
+        row.add("NSGrid_topPadding", *b.float64(0.0))
+        row.add("NSGrid_bottomPadding", *b.float64(0.0))
+        row.add("NSGrid_hidden", *b.boolean(True))  # inverted: no attr -> True
+        carr = b.new("NSMutableArray")
+        carr.add("NSInlinedValue", *b.boolean(False))
+        row.add("NSGrid_cells", *b.ref(carr))
+        for c_el in el.findall(f"gridCells/gridCell[@row='{r_el.get('id')}']"):
+            cell = b.new("NSGridCell")
+            cell_of[c_el.get("id")] = cell
+            carr.add("UINibEncoderEmptyKey", *b.ref(cell))
+            cell.add("NSGrid_owningRow", *b.ref(row))
+            col_id = c_el.get("column")
+            if col_id not in col_objs:
+                col_el = cols[col_id]
+                col = b.new("NSGridColumn")
+                col_objs[col_id] = col
+                col.add("NSGrid_owningGrid", *b.ref(o))
+                col.add("NSGrid_xPlacement", *b.int8(XP.get(col_el.get("xPlacement"), 0)))
+                col.add("NSGrid_width", *b.float64(FLT_MIN))
+                col.add("NSGrid_leadingPadding", *b.float64(0.0))
+                col.add("NSGrid_trailingPadding", *b.float64(0.0))
+                col.add("NSGrid_hidden", *b.boolean(True))
+            cell.add("NSGrid_owningColumn", *b.ref(col_objs[col_id]))
+            cell.add("NSGrid_mergeHead", *(N.NIL, None))
+            cell.add("NSGrid_xPlacement", *b.int8(0))
+            cell.add("NSGrid_yPlacement", *b.int8(0))
+            cell.add("NSGrid_alignment", *b.int8(0))
+            content_el = c_el.find("*[@key='contentView']")
+            sub = id_map.get(content_el.get("id")) if content_el is not None else None
+            if sub is None:
+                raise I.XibError(f"<gridCell> without built contentView "
+                                 f"{content_el.get('id')!r} ({where})")
+            cell.add("NSGrid_content", *b.ref(sub))
+    clarr = b.new("NSMutableArray")
+    clarr.add("NSInlinedValue", *b.boolean(False))
+    for c_el in el.findall("columns/gridColumn"):
+        clarr.add("UINibEncoderEmptyKey", *b.ref(col_objs[c_el.get("id")]))
+    o.add("NSGrid_columns", *b.ref(clarr))
+    # _collect_keys emits the grid's key pairs (rows, columns, then per-cell
+    # groups); it needs the scaffolding objects, which have no xib ids
+    b.grid_meta[el.get("id")] = (
+        row_objs,
+        [col_objs[c.get("id")] for c in el.findall("columns/gridColumn")],
+        cell_of)
+
+
+def _view(b, el, where, superview=None, id_map=None, guides=None, parent=None,
+          root=False):
+    """<view>/<customView> -> NSView or NSClassSwapper; returns (obj, pairs).
+
+    Allocation order is Apple's: the object, then subviews depth-first (each
+    subview completes, cell included), then this view's frame, constraints
+    (probe-ordered), layout guides, IB guide placeholders."""
+    is_custom = el.tag == "customView" or el.get("customClass")
+    o = b.new("NSStackView" if el.tag == "stackView"
+              else "NSGridView" if el.tag == "gridView"
+              else "NSClassSwapper" if is_custom else "NSView")
+    if is_custom:
+        # probe NNW3OpenPanelAccessoryView: bare <customView> (no customClass)
+        # archives as NSClassSwapper with NSView/NSView; with customClass the
+        # mangled name + NSView
+        o.add("NSClassName", *b.ref(b.string(I._swift_class(el) or "NSView")))
+        o.add("NSOriginalClassName", *b.ref(b.string("NSView")))
+    o.add("NSNextResponder", *(b.ref(superview) if superview is not None else (N.NIL, None)))
+    o.add("NSNibTouchBar", *(N.NIL, None))
+    v, vt = _vflags(el, where)
+    o.add("NSvFlags", vt, v)
+    id_map[el.get("id")] = o
+    keys = [(o, parent)]
     if el.tag == "gridView":
-        # probe AccountsFeedbin [106..128]: contents build as plain subviews
-        # (gridCell doc order), then grid scaffolding after the frame
-        XP = {"trailing": 3, "leading": 2}
-        o.add("NSGrid_rowSpacing", *b.float64(float(el.get("rowSpacing", 0))))
-        o.add("NSGrid_columnSpacing", *b.float64(float(el.get("columnSpacing", 0))))
-        o.add("NSGrid_xPlacement", *b.int8(XP.get(el.get("xPlacement"), 0)))
-        o.add("NSGrid_yPlacement", *b.int8({"center": 4}.get(el.get("yPlacement"), 0)))
-        o.add("NSGrid_alignment", *b.int8({"none": 1}.get(el.get("rowAlignment"), 0)))
-        FLT_MIN = 1.1754943508222875e-38
-        rows = {r.get("id"): r for r in el.findall("rows/gridRow")}
-        cols = {c.get("id"): c for c in el.findall("columns/gridColumn")}
-        rarr = b.new("NSMutableArray")
-        rarr.add("NSInlinedValue", *b.boolean(False))
-        o.add("NSGrid_rows", *b.ref(rarr))
-        col_objs = {}
-        row_objs = []
-        cell_of = {}
-        for r_el in el.findall("rows/gridRow"):
-            row = b.new("NSGridRow")
-            row_objs.append(row)
-            rarr.add("UINibEncoderEmptyKey", *b.ref(row))
-            row.add("NSGrid_owningGrid", *b.ref(o))
-            row.add("NSGrid_yPlacement", *b.int8(0))
-            row.add("NSGrid_alignment", *b.int8(0))
-            row.add("NSGrid_height", *b.float64(FLT_MIN))
-            row.add("NSGrid_topPadding", *b.float64(0.0))
-            row.add("NSGrid_bottomPadding", *b.float64(0.0))
-            row.add("NSGrid_hidden", *b.boolean(True))  # inverted: no attr -> True
-            carr = b.new("NSMutableArray")
-            carr.add("NSInlinedValue", *b.boolean(False))
-            row.add("NSGrid_cells", *b.ref(carr))
-            for c_el in el.findall(f"gridCells/gridCell[@row='{r_el.get('id')}']"):
-                cell = b.new("NSGridCell")
-                cell_of[c_el.get("id")] = cell
-                carr.add("UINibEncoderEmptyKey", *b.ref(cell))
-                cell.add("NSGrid_owningRow", *b.ref(row))
-                col_id = c_el.get("column")
-                if col_id not in col_objs:
-                    col_el = cols[col_id]
-                    col = b.new("NSGridColumn")
-                    col_objs[col_id] = col
-                    col.add("NSGrid_owningGrid", *b.ref(o))
-                    col.add("NSGrid_xPlacement", *b.int8(XP.get(col_el.get("xPlacement"), 0)))
-                    col.add("NSGrid_width", *b.float64(FLT_MIN))
-                    col.add("NSGrid_leadingPadding", *b.float64(0.0))
-                    col.add("NSGrid_trailingPadding", *b.float64(0.0))
-                    col.add("NSGrid_hidden", *b.boolean(True))
-                cell.add("NSGrid_owningColumn", *b.ref(col_objs[col_id]))
-                cell.add("NSGrid_mergeHead", *(N.NIL, None))
-                cell.add("NSGrid_xPlacement", *b.int8(0))
-                cell.add("NSGrid_yPlacement", *b.int8(0))
-                cell.add("NSGrid_alignment", *b.int8(0))
-                content_el = c_el.find("*[@key='contentView']")
-                sub = id_map.get(content_el.get("id")) if content_el is not None else None
-                if sub is None:
-                    raise I.XibError(f"<gridCell> without built contentView "
-                                     f"{content_el.get('id')!r} ({where})")
-                cell.add("NSGrid_content", *b.ref(sub))
-        clarr = b.new("NSMutableArray")
-        clarr.add("NSInlinedValue", *b.boolean(False))
-        for c_el in el.findall("columns/gridColumn"):
-            clarr.add("UINibEncoderEmptyKey", *b.ref(col_objs[c_el.get("id")]))
-        o.add("NSGrid_columns", *b.ref(clarr))
-        # collect() emits the grid's key pairs (rows, columns, then per-cell
-        # groups); it needs the scaffolding objects, which have no xib ids
-        b.grid_meta[el.get("id")] = (
-            row_objs,
-            [col_objs[c.get("id")] for c in el.findall("columns/gridColumn")],
-            cell_of)
+        # gridCell contentView elements are the subview source (probe
+        # AccountsFeedbin [107]: doc order, grid is NSNextResponder)
+        contents = []
+        for c_el in el.findall("gridCells/gridCell"):
+            content_el = c_el.find("*[@key='contentView']")
+            if content_el is None:
+                raise I.XibError(f"<gridCell> without contentView ({where})")
+            contents.append(content_el)
+        _add_subview_elements(b, contents, o, where, id_map, guides, keys)
+        subs = None
+    else:
+        subs = el.find("subviews")
+        if subs is not None:
+            _add_subview_elements(b, subs, o, where, id_map, guides, keys)
+    _view_frame(b, el, o, where, superview)
+    if el.get("alphaValue") is not None:
+        o.add("NSViewAlphaValue", *b.float64(float(el.get("alphaValue"))))
+    o.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
+    if superview is not None and _translates(el):
+        o.add("NSDoNotTranslateAutoresizingMask", *b.boolean(False))
+    _view_constraints_and_guides(b, el, o, where, id_map, guides, keys)
+    if el.tag == "stackView":
+        _stack_view_extras(b, el, o, where, subs)
+    if el.tag == "gridView":
+        _grid_view_extras(b, el, o, where, id_map)
     return o, keys
 
 
