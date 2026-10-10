@@ -39,10 +39,15 @@
 #       PKG must be signed with a real certificate: xtool's free-provisioning
 #       signing only happens inside `xtool dev run`.
 #
-# Tailscale: mDNS discovery does not cross tailscale0, and Apple's remoted
-# binds the phone's LAN interface, so a phone reachable only via Tailscale is
-# not directly deployable. The supported remote pattern is pymobiledevice3's
-# tunneld WebSocket bridge -- on a machine that CAN see the phone (USB or
+#   ./device-run.sh --over-tailnet HOST PKG   install+launch over Tailscale with no cable and
+#       no Mac, iOS 27: HOST is the phone's tailnet address (100.x). One-time setup over USB:
+#       `tools/tailnet-tunnel.py pair`. tailnet-tunnel.py opens the RemotePairing tunnel (the
+#       phone advertises it on port 49152 and accepts it from any routed address; lockdownd
+#       does not, and mDNS does not cross the tailnet). Needs sudo for the TUN device and a
+#       signed PKG. How-to, limits and receipts: docs/OVER-TAILNET.md.
+#
+# Without a tailnet pairing record, a phone reachable only via Tailscale can still be reached
+# through pymobiledevice3's tunneld WebSocket bridge on a machine that sees the phone (USB or
 # same LAN):
 #     sudo pymobiledevice3 remote tunneld        # prints its WS port
 # then, from the remote host:
@@ -58,7 +63,7 @@ export PATH
 XT="$HOME/.local/bin/xtool"
 PMD3="$HOME/pymobile3-venv/bin/pymobiledevice3"
 
-MODE=usb; UDID=; RSD_HOST=; RSD_PORT=; PKG=; LLDB=0; SUDO=0; ATTACH=0
+MODE=usb; UDID=; RSD_HOST=; RSD_PORT=; PKG=; LLDB=0; SUDO=0; ATTACH=0; TAILNET_HOST=
 while [ $# -gt 0 ]; do
   case "$1" in
     --network) MODE=network ;;
@@ -71,7 +76,11 @@ while [ $# -gt 0 ]; do
       RSD_PORT="${3:?usage: --rsd HOST PORT PACKAGE}"
       PKG="${4:?usage: --rsd HOST PORT PACKAGE}"
       shift 3 ;;
-    *) echo "Unknown argument: $1 (modes: [--lldb|--attach [--sudo]] [--network] [--rsd HOST PORT PKG])" >&2; exit 2 ;;
+    --over-tailnet) MODE=tailnet
+      TAILNET_HOST="${2:?usage: --over-tailnet PHONE_TAILNET_IP PACKAGE}"
+      PKG="${3:?usage: --over-tailnet PHONE_TAILNET_IP PACKAGE}"
+      shift 2 ;;
+    *) echo "Unknown argument: $1 (modes: [--lldb|--attach [--sudo]] [--network] [--rsd HOST PORT PKG] [--over-tailnet HOST PKG])" >&2; exit 2 ;;
   esac
   shift
 done
@@ -291,6 +300,15 @@ print(json.load(sys.stdin)[sys.argv[1]]["Path"])' "$bid")
   return "$rc"
 }
 
+rsd_run() {
+  echo "== Install/launch via RSD $RSD_HOST:$RSD_PORT =="
+  $PMD3 apps install "$PKG" --rsd "$RSD_HOST" "$RSD_PORT"
+  BID=$(grep -E '^bundleID:' xtool.yml | awk '{print $2}')
+  if [ -z "$BID" ]; then echo "No bundle_id in xtool.yml; launch it by hand:"; else
+    $PMD3 developer core-device launch-application "$BID" "" --rsd "$RSD_HOST" "$RSD_PORT"
+  fi
+}
+
 case "$MODE" in
 usb)
   echo "== 1. Device visible over USB? =="
@@ -331,11 +349,18 @@ network)
   $XT dev run --network "${UDID_ARGS[@]}"
   ;;
 rsd)
-  echo "== Install/launch via RSD $RSD_HOST:$RSD_PORT -- UNVERIFIED =="
-  $PMD3 apps install "$PKG" --rsd "$RSD_HOST" "$RSD_PORT"
-  BID=$(grep -E '^bundleID:' xtool.yml | awk '{print $2}')
-  if [ -z "$BID" ]; then echo "No bundle_id in xtool.yml; launch it by hand:"; else
-    $PMD3 developer core-device launch-application "$BID" "" --rsd "$RSD_HOST" "$RSD_PORT"
-  fi
+  rsd_run
+  ;;
+tailnet)
+  # The tunnel lives as long as tailnet-tunnel.py (sudo relays the signal to it): stopped when this script exits.
+  sudo -v || { echo "--over-tailnet needs sudo for the TUN device" >&2; exit 1; }
+  TT=$(mktemp)
+  "$(dirname "$PMD3")/python" "$(dirname "$0")/tools/tailnet-tunnel.py" "$TAILNET_HOST" "${UDID_ARGS[@]}" >"$TT" 2>&1 &
+  TTPID=$!
+  trap 'kill "$TTPID" 2>/dev/null || true; rm -f "$TT"' EXIT
+  for _ in $(seq 30); do grep -q '^RSD ' "$TT" && break; kill -0 "$TTPID" 2>/dev/null || break; sleep 1; done
+  read -r _ RSD_HOST RSD_PORT < <(grep '^RSD ' "$TT") || { cat "$TT" >&2; exit 1; }
+  echo "== Tunnel to $TAILNET_HOST up: RSD $RSD_HOST $RSD_PORT =="
+  rsd_run
   ;;
 esac
