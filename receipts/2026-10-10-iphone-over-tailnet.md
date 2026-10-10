@@ -46,6 +46,7 @@ Cable out, Wi-Fi on, from the M1 Max laptop (Swift 6.4 lldb, no on-disk device s
   (`libobjc.A.dylib is being read from process memory ... could not find the on-disk shared cache`) and the 150 s
   limit passed first. The repo's USB flow downloads the device's dyld shared cache once per iOS build
   (`developer fetch-symbols download`) to avoid this.
+  The cache for iPhone16,2 build 24A446 (from Apple's public IPSW, `ipsw extract --dyld`) is 81 files, 6.7 GB on disk (`du -sh`).
 - After every run the app was killed, the forwarder and tunnel were stopped, and `proclist` showed no app or debugserver
   left on the phone.
 
