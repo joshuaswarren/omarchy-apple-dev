@@ -1720,128 +1720,85 @@ class Generator:
                 out.append((tid, t))
         return out
 
-    def run(self):
-        target_id, self.target = self.pick_target()
-        target = self.target
-        name = target["name"]
-        layers = self.target_merged(target)
-        self.platform = self.platform_of(layers)
-        dev_region = self.project.get("developmentRegion")
+    def _write_bundle_plist(self, tname, plist, extension):
+        """Write one adapter Info.plist; returns its file name or None."""
+        if plist is None:
+            return None
+        fname = "Info.plist" if not extension else f"{tname}-Info.plist"
+        with open(os.path.join(self.out_dir, fname), "wb") as f:
+            plistlib.dump(plist, f)
+        return fname
 
-        podfile = os.path.join(self.proj_dir, "Podfile")
-        if os.path.isfile(podfile):
-            self.warn("Podfile found; CocoaPods dependencies are not converted")
-
-        others = [f"{o['name']} ({o.get('productType', '').rsplit('.', 1)[-1]})"
-                  for _i, o in self.app_targets() if _i != target_id]
-        if others:
-            self.warn(f"skipping non-selected application targets: {', '.join(others)}")
-        embedded = self.extension_targets(target_id)
-        other_exts = [o["name"] for i, o in self.objs.items()
-                      if o.get("isa") == "PBXNativeTarget"
-                      and o.get("productType", "").endswith("app-extension")
-                      and i not in {e for e, _ in embedded}]
-        if other_exts:
-            self.warn(f"app extensions not embedded in {name} are not converted: "
-                      f"{', '.join(other_exts)}")
-
-        if os.path.exists(os.path.join(self.out_dir, "Package.swift")) or \
-                os.path.exists(os.path.join(self.out_dir, "xtool.yml")):
-            raise SystemExit(f"error: {self.out_dir} already holds an adapter; "
-                             "pass --out to write elsewhere")
-
-        def write_plist(tname, plist, extension):
-            if plist is None:
-                return None
-            fname = "Info.plist" if not extension else f"{tname}-Info.plist"
-            with open(os.path.join(self.out_dir, fname), "wb") as f:
-                plistlib.dump(plist, f)
-            return fname
-
-        def materialize(tname, symlinks):
-            for link, dest in symlinks:
-                lpath = os.path.join(self.out_dir, link)
-                os.makedirs(os.path.dirname(lpath), exist_ok=True)
-                if os.path.lexists(lpath):
-                    continue
-                os.symlink(os.path.relpath(os.path.join(self.proj_dir, dest),
-                                           os.path.dirname(lpath)), lpath)
-
-        symlink_count = 0
-        symlinks, excludes, resources, swift_rels = self.plan_target_files(
-            target_id, target)
-        resources = self.dedupe_resources(resources)
-        packages, products = self.plan_packages(target, swift_rels)
-        app_products = list(products)
-        app_swift = self.swift_settings(layers)
-        os.makedirs(os.path.join(self.out_dir, "Sources", name), exist_ok=True)
-        materialize(name, symlinks)
-        symlink_count += len(symlinks)
-        app_info, _ = self.target_infoplan(layers, name, dev_region, extension=False)
-        app_info_path = write_plist(name, app_info, extension=False)
-        ent = self.setting(layers, "CODE_SIGN_ENTITLEMENTS")
-        if ent:
-            self.warn(f"CODE_SIGN_ENTITLEMENTS {ent!r} not wired (xtool dev signs "
-                      "without entitlements; ship.sh signs with its own)")
-
-        extensions = []
-        pkg_seen = set(packages)
-        for ext_id, ext in embedded:
-            ename = ext["name"]
-            elayers = self.target_merged(ext)
-            esym, eexc, eres, eswift = self.plan_target_files(ext_id, ext)
-            if not eswift:
-                self.warn(f"extension {ename} has no Swift sources; skipped")
+    def _materialize(self, tname, symlinks):
+        for link, dest in symlinks:
+            lpath = os.path.join(self.out_dir, link)
+            os.makedirs(os.path.dirname(lpath), exist_ok=True)
+            if os.path.lexists(lpath):
                 continue
-            eres = self.dedupe_resources(eres)
-            epkgs, eprods = self.plan_packages(ext, eswift)
-            new_pkgs = [p for p in epkgs if p not in pkg_seen]
-            pkg_seen.update(new_pkgs)
-            packages += new_pkgs
-            # Package declarations are shared across the manifest; product
-            # dependencies are per target (the widget must name RSWeb itself
-            # even when the app already depends on it).
-            os.makedirs(os.path.join(self.out_dir, "Sources", ename), exist_ok=True)
-            materialize(ename, esym)
-            symlink_count += len(esym)
-            eplist, _ = self.target_infoplan(elayers, ename, dev_region, extension=True)
-            epath = write_plist(ename, eplist, extension=True)
-            dt_key = PLATFORMS[self.platform][0]
-            edt = self.setting(elayers, dt_key)
-            adt = self.setting(layers, dt_key)
-            if edt and adt and self.expand(edt, elayers) != self.expand(adt, layers):
-                self.warn(f"extension {ename} deployment target {edt} differs from "
-                          f"the app's {adt}; xtool applies one platform to the whole "
-                          "package (the app's)")
-            ent = self.setting(elayers, "CODE_SIGN_ENTITLEMENTS")
-            if ent:
-                self.warn(f"{ename}: CODE_SIGN_ENTITLEMENTS {ent!r} not wired "
-                          "(xtool dev signs without entitlements; ship.sh signs "
-                          "with its own)")
-            eicon = self.setting(elayers, "ASSETCATALOG_COMPILER_APPICON_NAME")
-            if eicon:
-                self.extension_icons[ename] = eicon
-            extensions.append({
-                "name": ename,
-                "products": eprods,
-                "excludes": eexc,
-                "resources": eres,
-                "swift": self.swift_settings(elayers),
-                "bundleID": self.bundle_id(elayers),
-                "infoPath": epath,
-            })
+            os.symlink(os.path.relpath(os.path.join(self.proj_dir, dest),
+                                       os.path.dirname(lpath)), lpath)
 
-        self.write_manifest(name, layers, packages, app_products,
-                            excludes, resources, app_swift, extensions)
-        bundle = self.bundle_id(layers)
-        if self.forced_bundle_id:
-            for e in extensions:
-                orig = e["bundleID"]
-                if orig.startswith(bundle) and len(orig) > len(bundle):
-                    e["bundleID"] = self.forced_bundle_id + orig[len(bundle):]
-                else:
-                    e["bundleID"] = f"{self.forced_bundle_id}.{e['name'].replace(' ', '')}"
-            bundle = self.forced_bundle_id
+    def _plan_extension(self, ext_id, ext, app_layers, dev_region, packages, pkg_seen):
+        """Plan one embedded extension: files, packages, Info.plist, icon.
+        Returns (entry, symlink_count); appends its new package declarations
+        to packages. (None, 0) when the extension has no Swift sources."""
+        ename = ext["name"]
+        elayers = self.target_merged(ext)
+        esym, eexc, eres, eswift = self.plan_target_files(ext_id, ext)
+        if not eswift:
+            self.warn(f"extension {ename} has no Swift sources; skipped")
+            return None, 0
+        eres = self.dedupe_resources(eres)
+        epkgs, eprods = self.plan_packages(ext, eswift)
+        new_pkgs = [p for p in epkgs if p not in pkg_seen]
+        pkg_seen.update(new_pkgs)
+        packages += new_pkgs
+        # Package declarations are shared across the manifest; product
+        # dependencies are per target (the widget must name RSWeb itself
+        # even when the app already depends on it).
+        os.makedirs(os.path.join(self.out_dir, "Sources", ename), exist_ok=True)
+        self._materialize(ename, esym)
+        eplist, _ = self.target_infoplan(elayers, ename, dev_region, extension=True)
+        epath = self._write_bundle_plist(ename, eplist, extension=True)
+        dt_key = PLATFORMS[self.platform][0]
+        edt = self.setting(elayers, dt_key)
+        adt = self.setting(app_layers, dt_key)
+        if edt and adt and self.expand(edt, elayers) != self.expand(adt, app_layers):
+            self.warn(f"extension {ename} deployment target {edt} differs from "
+                      f"the app's {adt}; xtool applies one platform to the whole "
+                      "package (the app's)")
+        ent = self.setting(elayers, "CODE_SIGN_ENTITLEMENTS")
+        if ent:
+            self.warn(f"{ename}: CODE_SIGN_ENTITLEMENTS {ent!r} not wired "
+                      "(xtool dev signs without entitlements; ship.sh signs "
+                      "with its own)")
+        eicon = self.setting(elayers, "ASSETCATALOG_COMPILER_APPICON_NAME")
+        if eicon:
+            self.extension_icons[ename] = eicon
+        entry = {
+            "name": ename,
+            "products": eprods,
+            "excludes": eexc,
+            "resources": eres,
+            "swift": self.swift_settings(elayers),
+            "bundleID": self.bundle_id(elayers),
+            "infoPath": epath,
+        }
+        return entry, len(esym)
+
+    def _rebase_extension_bundle_ids(self, extensions, bundle):
+        """With --bundle-id: extension IDs that start with the app's original
+        ID keep their suffix; the rest get '.' + the product name with spaces
+        removed. Returns the app bundle id to write."""
+        for e in extensions:
+            orig = e["bundleID"]
+            if orig.startswith(bundle) and len(orig) > len(bundle):
+                e["bundleID"] = self.forced_bundle_id + orig[len(bundle):]
+            else:
+                e["bundleID"] = f"{self.forced_bundle_id}.{e['name'].replace(' ', '')}"
+        return self.forced_bundle_id
+
+    def _write_xtool_yml(self, name, bundle, app_info_path, extensions):
         yml = "version: 1\n"
         yml += f"bundleID: {bundle}\n"
         yml += f"product: {name}\n"
@@ -1856,21 +1813,8 @@ class Generator:
         with open(os.path.join(self.out_dir, "xtool.yml"), "w") as f:
             f.write(yml)
 
-        icon = self.setting(layers, "ASSETCATALOG_COMPILER_APPICON_NAME") or "AppIcon"
-        # Icon Composer .icon: ASSETCATALOG_COMPILER_APPICON_NAME is the icon
-        # *name* (no extension). The app target's primary asset is the
-        # <name>.icon directory in either a classic Resources phase or a
-        # synced group. Symlink it into the adapter root so ship.sh (and the
-        # Linux actool) can render it; the project's own file is left alone.
-        app_icon_linked = self.symlink_app_icon(target, layers)
-        # Alternate icons: ship.sh compiles them with the Xcode 27 flags
-        # (--alternate-app-icon / --include-all-app-icons) straight from the
-        # project tree; symlink alternate .icon directories into the adapter
-        # root beside the primary so the actool inputs resolve.
-        alternates_linked = self.symlink_alternate_icons(target, layers, exclude=self.primary_app_icon_name(layers))
-        print(f"APP_ICON={icon}   # pass to ship.sh")
-        env_path = os.path.join(self.out_dir, "xtool.env")
-        with open(env_path, "w") as f:
+    def _write_xtool_env(self, layers, icon):
+        with open(os.path.join(self.out_dir, "xtool.env"), "w") as f:
             # Sourced by ship.sh: quote every value (extension product names may contain spaces).
             f.write(f"APP_ICON={shlex.quote(icon)}\n")
             if self.alternate_icon_names:
@@ -1884,8 +1828,8 @@ class Generator:
                 # One "<product>=<icon>" per line.
                 f.write("EXTENSION_APP_ICONS=" + shlex.quote("\n".join(
                     f"{name}={icn}" for name, icn in sorted(self.extension_icons.items()))) + "\n")
-        for w in self.warnings:
-            print(w, file=sys.stderr)
+
+    def _write_bsp(self):
         # A .bsp at the project root lets an editor open the Xcode project itself.
         adapter_rel = os.path.relpath(self.out_dir, self.proj_dir)
         proj_bsp = os.path.join(self.proj_dir, ".bsp", "xtool.json")
@@ -1900,6 +1844,90 @@ class Generator:
                     "argv": ["/usr/bin/env", "xtool", "dev", "build-server", "--package-path", adapter_rel],
                 }, f, indent=4)
                 f.write("\n")
+
+    def _warn_unselected_targets(self, target_id, name):
+        """Skipped targets and extensions; returns the embedded extensions."""
+        podfile = os.path.join(self.proj_dir, "Podfile")
+        if os.path.isfile(podfile):
+            self.warn("Podfile found; CocoaPods dependencies are not converted")
+        others = [f"{o['name']} ({o.get('productType', '').rsplit('.', 1)[-1]})"
+                  for _i, o in self.app_targets() if _i != target_id]
+        if others:
+            self.warn(f"skipping non-selected application targets: {', '.join(others)}")
+        embedded = self.extension_targets(target_id)
+        other_exts = [o["name"] for i, o in self.objs.items()
+                      if o.get("isa") == "PBXNativeTarget"
+                      and o.get("productType", "").endswith("app-extension")
+                      and i not in {e for e, _ in embedded}]
+        if other_exts:
+            self.warn(f"app extensions not embedded in {name} are not converted: "
+                      f"{', '.join(other_exts)}")
+        return embedded
+
+    def run(self):
+        target_id, self.target = self.pick_target()
+        target = self.target
+        name = target["name"]
+        layers = self.target_merged(target)
+        self.platform = self.platform_of(layers)
+        dev_region = self.project.get("developmentRegion")
+        embedded = self._warn_unselected_targets(target_id, name)
+
+        if os.path.exists(os.path.join(self.out_dir, "Package.swift")) or \
+                os.path.exists(os.path.join(self.out_dir, "xtool.yml")):
+            raise SystemExit(f"error: {self.out_dir} already holds an adapter; "
+                             "pass --out to write elsewhere")
+
+        symlink_count = 0
+        symlinks, excludes, resources, swift_rels = self.plan_target_files(
+            target_id, target)
+        resources = self.dedupe_resources(resources)
+        packages, products = self.plan_packages(target, swift_rels)
+        app_products = list(products)
+        app_swift = self.swift_settings(layers)
+        os.makedirs(os.path.join(self.out_dir, "Sources", name), exist_ok=True)
+        self._materialize(name, symlinks)
+        symlink_count += len(symlinks)
+        app_info, _ = self.target_infoplan(layers, name, dev_region, extension=False)
+        app_info_path = self._write_bundle_plist(name, app_info, extension=False)
+        ent = self.setting(layers, "CODE_SIGN_ENTITLEMENTS")
+        if ent:
+            self.warn(f"CODE_SIGN_ENTITLEMENTS {ent!r} not wired (xtool dev signs "
+                      "without entitlements; ship.sh signs with its own)")
+
+        extensions = []
+        pkg_seen = set(packages)
+        for ext_id, ext in embedded:
+            entry, n = self._plan_extension(ext_id, ext, layers, dev_region,
+                                            packages, pkg_seen)
+            symlink_count += n
+            if entry:
+                extensions.append(entry)
+
+        self.write_manifest(name, layers, packages, app_products,
+                            excludes, resources, app_swift, extensions)
+        bundle = self.bundle_id(layers)
+        if self.forced_bundle_id:
+            bundle = self._rebase_extension_bundle_ids(extensions, bundle)
+        self._write_xtool_yml(name, bundle, app_info_path, extensions)
+
+        icon = self.setting(layers, "ASSETCATALOG_COMPILER_APPICON_NAME") or "AppIcon"
+        # Icon Composer .icon: ASSETCATALOG_COMPILER_APPICON_NAME is the icon
+        # *name* (no extension). The app target's primary asset is the
+        # <name>.icon directory in either a classic Resources phase or a
+        # synced group. Symlink it into the adapter root so ship.sh (and the
+        # Linux actool) can render it; the project's own file is left alone.
+        app_icon_linked = self.symlink_app_icon(target, layers)
+        # Alternate icons: ship.sh compiles them with the Xcode 27 flags
+        # (--alternate-app-icon / --include-all-app-icons) straight from the
+        # project tree; symlink alternate .icon directories into the adapter
+        # root beside the primary so the actool inputs resolve.
+        alternates_linked = self.symlink_alternate_icons(target, layers, exclude=self.primary_app_icon_name(layers))
+        print(f"APP_ICON={icon}   # pass to ship.sh")
+        self._write_xtool_env(layers, icon)
+        for w in self.warnings:
+            print(w, file=sys.stderr)
+        self._write_bsp()
         print(f"wrote {self.out_dir} (Package.swift, xtool.yml, xtool.env, "
               f"{symlink_count} symlinks under Sources/, "
               f"{len(extensions)} extensions"
