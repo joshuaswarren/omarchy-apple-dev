@@ -20,8 +20,11 @@ Verified in a clean Ubuntu 24.04 container on 2026-10-09, no-xcode mode:
 | xtool build from source | works, after the libimobiledevice step below |
 | rcodesign + ipsw binary downloads | work |
 | pymobiledevice3 in a venv | works (11.26.0) |
-| `sdk-free/setup.sh` linker toolset + objc4 headers | work |
-| stub cut, stdlib, overlays, `swiftc.sh`, `flutter-build.sh` | see status note below |
+| `sdk-free/setup.sh` (toolset, objc4 headers, stub cut from a dyld cache, sysroot, actool) | works |
+| `sdk-free/swift/build-stdlib.sh` | works (Swift, SwiftOnoneSupport, _Concurrency, _RegexParser, _StringProcessing) |
+| `sdk-free/swiftc.sh` on a hello program | links an arm64 iOS binary |
+| apfs-fuse build (the no-phone IPSW path) | builds from the pinned commit |
+| `sdk-free/swift/overlays.sh`, `sdk-free/flutter-build.sh` | not yet run on Ubuntu; verified on Arch with the same scripts |
 
 Install the packages:
 
@@ -68,11 +71,12 @@ export PKG_CONFIG_PATH=$PREFIX/lib/pkgconfig
 
 Then run `./install-toolchain.sh` as usual.
 
-Status note: the stub cut reads the dyld shared cache; on the container host
-the cache directory was not readable by root (NFS root squash), so the runs
-quoted above used a user account for those steps. `swiftc.sh` and
-`flutter-build.sh` were verified on Arch with the same sysroot; on Ubuntu the
-steps are identical once `sdk-free/setup.sh` has run.
+Status note: every step above ran in the container under a normal user
+account. The dyld shared cache was read from a prepared cache directory
+(`SDKFREE_DSC_DIR`), so no IPSW download was needed; `ipsw dyld tbd` and the
+apfs-fuse build were verified separately. `overlays.sh` and `flutter-build.sh`
+are plain shell over the same tools and were verified on Arch with the same
+sysroot contents.
 
 ## Fedora — untested
 
