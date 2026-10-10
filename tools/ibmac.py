@@ -2325,6 +2325,59 @@ def _xib_accessibility(b, objects, id_map, where, oid_count):
     return access_conns, access_oids, access_vals
 
 
+def _xib_doc_walk_keys(b, objects, owner, nsapp, id_map, keys, vis_ids,
+                       bind_key_pairs, late_menus, where):
+    """Document-walk key collection into keys; returns the (obj, parent)
+    values list (NSApplication proxy first)."""
+    for el in objects:
+        if el.get("id") in ("-1", "-2", "-3") or el.tag == "placeholder":
+            continue
+        if el.get("id") in vis_ids:
+            continue
+        if el.tag == "menu":
+            _collect_menu_keys(b, el, owner, id_map, keys, where)
+        elif el.tag == "userDefaultsController":
+            # keyed once via bind_key_pairs below (golden GP [120] / Crash [22]
+            # / Adv [58]+[59]: declared top-level UDCs never key from the doc
+            # walk, only from their bindings)
+            pass
+        else:
+            _collect_keys(b, el, owner, id_map, keys, where)
+    keys.extend(bind_key_pairs)  # userDefaultsControllers (probe CrashReporter [131])
+    for late, menu_id in late_menus:
+        late.obj = id_map[menu_id]
+    if any(isinstance(k, _DeferredPairs) for k in keys):
+        expanded = []
+        for k in keys:
+            expanded.extend(k.fn()) if isinstance(k, _DeferredPairs) \
+                else expanded.append(k)
+        keys[:] = expanded
+    values = [(nsapp, owner)]
+    values.extend(keys)
+    return values
+
+
+def _xib_oid_arrays(b, values, keys, owner, nsapp, conn_objs):
+    """NSObjectsValues plus the NSOids keys/values arrays (oid 1 = owner,
+    2 = NSApplication proxy, then the key pairs, then the connectors)."""
+    values_arr = b.new("NSArray")
+    values_arr.add("NSInlinedValue", *b.boolean(False))
+    for obj, parent in values:
+        values_arr.add("UINibEncoderEmptyKey", *b.ref(parent))
+    oids = [owner, nsapp] + [obj for obj, _ in keys] + conn_objs
+    oids_keys_arr = b.new("NSArray")
+    oids_keys_arr.add("NSInlinedValue", *b.boolean(False))
+    for obj in oids:
+        oids_keys_arr.add("UINibEncoderEmptyKey", *b.ref(obj))
+    oids_values_arr = b.new("NSArray")
+    oids_values_arr.add("NSInlinedValue", *b.boolean(False))
+    numbers = []
+    for i in range(1, len(oids) + 1):
+        numbers.append(b.number(*int_fit(i)))
+        oids_values_arr.add("UINibEncoderEmptyKey", *b.ref(numbers[-1]))
+    return values_arr, oids_keys_arr, oids_values_arr
+
+
 def compile_xib(path):
     """Compile one macOS xib to NIBArchive bytes. Raises XibError."""
     doc, objects, where = _xib_parse(path)
@@ -2408,56 +2461,22 @@ def compile_xib(path):
     # NSObjectsKeys: NSApplication proxy, then the collected (obj, parent)
     # pairs. Allocation order (probe MainMenu): keys array shell first, then
     # the NSApplication proxy, then the tree-phase builds.
+    # NSObjectsKeys: NSApplication proxy, then the collected (obj, parent)
+    # pairs. Allocation order (probe MainMenu): keys array shell first, then
+    # the NSApplication proxy, then the tree-phase builds.
     keys_arr = b.new("NSArray")
     keys_arr.add("NSInlinedValue", *b.boolean(False))
     nsapp = _xib_app_proxy(b, objects, path, where)
-    for el in objects:
-        if el.get("id") in ("-1", "-2", "-3") or el.tag == "placeholder":
-            continue
-        if el.get("id") in vis_ids:
-            continue
-        if el.tag == "menu":
-            _collect_menu_keys(b, el, owner, id_map, keys, where)
-        elif el.tag == "userDefaultsController":
-            # keyed once via bind_key_pairs below (golden GP [120] / Crash [22]
-            # / Adv [58]+[59]: declared top-level UDCs never key from the doc
-            # walk, only from their bindings)
-            pass
-        else:
-            _collect_keys(b, el, owner, id_map, keys, where)
-    keys.extend(bind_key_pairs)  # userDefaultsControllers (probe CrashReporter [131])
-    for late, menu_id in late_menus:
-        late.obj = id_map[menu_id]
-    if any(isinstance(k, _DeferredPairs) for k in keys):
-        expanded = []
-        for k in keys:
-            expanded.extend(k.fn()) if isinstance(k, _DeferredPairs) \
-                else expanded.append(k)
-        keys = expanded
-    values = [(nsapp, owner)]
-    values.extend(keys)
+    values = _xib_doc_walk_keys(b, objects, owner, nsapp, id_map, keys,
+                                vis_ids, bind_key_pairs, late_menus, where)
     keys_arr.add("UINibEncoderEmptyKey", *b.ref(nsapp))
     for obj, _parent in keys:
         keys_arr.add("UINibEncoderEmptyKey", *b.ref(obj))
 
-    values_arr = b.new("NSArray")
-    values_arr.add("NSInlinedValue", *b.boolean(False))
-    for obj, parent in values:
-        values_arr.add("UINibEncoderEmptyKey", *b.ref(parent))
-
-    oids = [owner, nsapp] + [obj for obj, _ in keys] + conn_objs
-    oids_keys_arr = b.new("NSArray")
-    oids_keys_arr.add("NSInlinedValue", *b.boolean(False))
-    for obj in oids:
-        oids_keys_arr.add("UINibEncoderEmptyKey", *b.ref(obj))
-    oids_values_arr = b.new("NSArray")
-    oids_values_arr.add("NSInlinedValue", *b.boolean(False))
-    numbers = []
-    for i in range(1, len(oids) + 1):
-        numbers.append(b.number(*int_fit(i)))
-        oids_values_arr.add("UINibEncoderEmptyKey", *b.ref(numbers[-1]))
+    values_arr, oids_keys_arr, oids_values_arr = _xib_oid_arrays(
+        b, values, keys, owner, nsapp, conn_objs)
     access_conns, access_oids, access_vals = _xib_accessibility(
-        b, objects, id_map, where, len(oids))
+        b, objects, id_map, where, 2 + len(keys) + len(conn_objs))
 
     ibd.add("NSRoot", *b.ref(owner))
     ibd.add("NSVisibleWindows", *b.ref(vis))
