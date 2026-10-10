@@ -50,7 +50,7 @@ Cable out, Wi-Fi on, from the M1 Max laptop (Swift 6.4 lldb, no on-disk device s
   `/usr/lib/libobjc*`: 70 MB (`du -sh`). With `platform select remote-ios --sysroot`, the warning is gone and `continue`
   runs the app (process state running for 60 s).
 - Still not shown: a stop at a breakpoint. Three runs with the sysroot: `breakpoint set -r` on the mangled body name found no
-  location; `breakpoint set -n main` resolved to `0x1024ec444` (run 4) and the app ran past it with no stop; `bt` then
+  location; `breakpoint set -n main` resolved to `0x1024ec444` (last run) and the app ran past it with no stop; `bt` then
   reported "requires a process which is currently stopped". Cause unknown (not yet checked: debugserver's reply to the
   breakpoint insert, lldb's image slide at `_dyld_start`).
 - After every run the app was killed, the forwarder and tunnel were stopped, and `proclist` showed no app or debugserver
