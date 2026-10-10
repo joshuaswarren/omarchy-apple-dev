@@ -37,7 +37,7 @@ runtime headers. Choose it with `./install-toolchain.sh --mode no-xcode` (or ans
 - No phone: `sdk-free/setup.sh --ipsw` pulls the cache from Apple's public iOS update download instead
   (`--ipsw=<build>` or `--build <build>` pins the build, `--device <model>` or `SDKFREE_DEVICE` picks the model,
   default `iPhone16,2`; `SDKFREE_IPSW=auto` is the same as `--ipsw`). Setup builds the small cache reader
-  `apfs-fuse` from a pinned source commit (`pacman -S --needed fuse3 cmake git gcc bzip2 zlib` if it cannot).
+  `apfs-fuse` from a pinned source commit (needs the fuse3 headers, cmake, a C/C++ compiler, bzip2 and zlib; docs/DISTROS.md lists the package names per distribution).
   The download lands in `$SDKFREE_HOME/cache` (`SDKFREE_TMP` moves it) and is deleted once the stubs are cut. A
   phone is then only needed to run the apps.
 - For Flutter: `flutter/setup.sh` once, and the `llvm` and `rsync` packages (`flutter/README.md`).
