@@ -132,7 +132,7 @@ the native arm64 run is staged and pending
 ### M2 — a SwiftUI view renders to a PNG (software draw path, no GPU)
 
 - Entry checks: M1 done; a starting view vocabulary picked from `sdk-free/swiftui/`
-  (VStack, Text, Image, Color, padding); a CPU rasterizer plan: RGBA buffer plus PNG
+  (VStack, Text, Button, `@State`); a CPU rasterizer plan: RGBA buffer plus PNG
   writer, bitmap font for text first, real font shaping later.
 - Exit demo (expected shape):
   ```

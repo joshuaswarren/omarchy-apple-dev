@@ -76,7 +76,8 @@ account. The dyld shared cache was read from a prepared cache directory
 (`SDKFREE_DSC_DIR`), so no IPSW download was needed; `ipsw dyld tbd` and the
 apfs-fuse build were verified separately. `overlays.sh` and `flutter-build.sh`
 are plain shell over the same tools and were verified on Arch with the same
-sysroot contents.
+sysroot contents. Receipt with the quoted outputs:
+`receipts/2026-10-09-ubuntu-2404.md`.
 
 ## Fedora — untested
 
