@@ -876,32 +876,12 @@ class Generator:
 
     # -- target file plan ---------------------------------------------------
 
-    def plan_target_files(self, target_id, target):
-        """Returns (symlinks, excludes, resources, swift_rels, objc_hits).
-
-        symlinks: [(link_path_relative_to_out, destination_relative_to_project_dir)]
-        excludes/resources: paths relative to Sources/<Target>.
-        swift_rels: project-relative paths of the target's .swift files.
-        """
-        target_dir = f"Sources/{target['name']}"
-        symlinks, excludes, resources, swift_rels, objc = [], [], [], [], []
-        ib_all = []
+    def _plan_synced_groups(self, target_id, target, target_dir, infoplist_rel):
+        """One symlink + plan per synced group the target owns. Returns the
+        accumulators plus the group's IB paths (pre-excluded in the group
+        plan) and the set of those paths."""
+        symlinks, excludes, resources, swift_rels, ib_all = [], [], [], [], []
         synced_ib_paths = set()
-        infoplist_rel = None
-
-        layers = self.target_merged(target)
-        # Only the selected app target's ASSETCATALOG_COMPILER_APPICON_NAME
-        # names its primary .icon; extensions (and tests) reuse "AppIcon" as
-        # a default that must NOT silently consume the app's asset.
-        app_icon_name = None
-        if target is getattr(self, "target", None):
-            name = self.setting(layers, "ASSETCATALOG_COMPILER_APPICON_NAME") or "AppIcon"
-            if name and not name.endswith(".icon"):
-                app_icon_name = f"{name}.icon"
-        ipf = self.setting(layers, "INFOPLIST_FILE")
-        if ipf:
-            infoplist_rel = os.path.normpath(ipf)
-
         for gid in target.get("fileSystemSynchronizedGroups", []):
             g = self.objs.get(gid, {})
             gpath = self.synced_group_path(gid) or (g.get("path") or g.get("name"))
@@ -922,13 +902,15 @@ class Generator:
             base = os.path.join(self.proj_dir, gpath)
             swift_rels += [os.path.join(gpath, os.path.relpath(f, base))
                            for f in walk_files(base) if f.endswith(".swift")]
+        return symlinks, excludes, resources, swift_rels, ib_all, synced_ib_paths
 
-        # An exception set naming this target on a synced group the target
-        # does NOT own adds those files to the target (Xcode's way of sharing
-        # a few files of another target's folder). For the owner, the same
-        # set removes files (handled in synced_group_plan).
+    def _plan_shared_exceptions(self, target_id, target, target_dir, taken,
+                                symlinks, excludes, resources, swift_rels):
+        """Exception sets naming this target on synced groups the target does
+        NOT own add those files to the target (Xcode's way of sharing a few
+        files of another target's folder). For the owner, the same set removes
+        files (handled in synced_group_plan)."""
         owned = set(target.get("fileSystemSynchronizedGroups", []))
-        taken = {os.path.relpath(l, target_dir).split(os.sep)[0] for l, _ in symlinks}
         added = []
         for gid, g in self.objs.items():
             if g.get("isa") != "PBXFileSystemSynchronizedRootGroup" or gid in owned:
@@ -966,9 +948,14 @@ class Generator:
             self.warn(f"{target['name']}: {len(added)} file(s) shared from other "
                       f"targets' synced folders added, e.g. {added[0]}")
 
+    def _plan_phase_sources(self, target, target_dir, symlinks, excludes, swift_rels):
+        """Classify the target's build-phase files: Swift members (with their
+        longest-common directory, symlinked as the source anchor), ObjC hits,
+        and resources (localized variant groups included)."""
+        objc = []
+        src_anc = None
         src_files = self.phase_files(target, "PBXSourcesBuildPhase")
         res_files = self.phase_files(target, "PBXResourcesBuildPhase")
-        src_anc = None
         if src_files:
             members = []
             src_resources = []
@@ -1014,7 +1001,43 @@ class Generator:
         if objc:
             self.warn(f"{len(objc)} ObjC/C source files are not supported and were "
                       f"excluded, e.g. {objc[0]}")
+        return res_files, src_anc
 
+    def _plan_ib_resources(self, target_dir, ib_all, synced_ib_paths, src_anc,
+                           symlinks, excludes, resources):
+        """Interface Builder resources: probe each with the Linux ibtool;
+        compilable ones ship as resources, the rest are excluded."""
+        ib_missing = []
+        for p in ib_all:
+            base = os.path.splitext(os.path.basename(p))[0]
+            in_synced = p in synced_ib_paths
+            under_anc = not in_synced and src_anc and (
+                p == src_anc or p.startswith(src_anc + "/"))
+            if under_anc:
+                rel = os.path.relpath(p, src_anc)
+                rp = os.path.basename(src_anc) if rel == "." \
+                    else os.path.join(os.path.basename(src_anc), rel)
+            else:
+                rp = p
+            if ibtool_compiles(os.path.join(self.proj_dir, p)):
+                resources.append((".process", rp))
+                # synced groups pre-exclude their IB files; an emitted one
+                # must not stay in exclude: (SwiftPM would drop it again)
+                excludes[:] = [e for e in excludes if e != rp]
+                if not under_anc and not in_synced:
+                    self.mirror_file(p, target_dir, symlinks)
+            else:
+                excludes.append(rp)
+                ib_missing.append(p)
+        return ib_missing
+
+    def _plan_resources(self, target, layers, target_dir, res_files, src_anc,
+                        synced_ib_paths, infoplist_rel,
+                        symlinks, excludes, resources, ib_all):
+        """Resource-phase entries: IB files deferred to the ibtool probe, .icon
+        assets left to ship.sh, the rest emitted under the source anchor when
+        one exists. Runs the IB probe and the intent Swift generation.
+        Returns the excluded IB files."""
         ib_excluded = []
         for ref_id, p in res_files:
             if os.path.splitext(p)[1].lower() in IB_EXTS:
@@ -1055,34 +1078,14 @@ class Generator:
             else:
                 self.mirror_file(p, target_dir, symlinks)
         ib_all += ib_excluded
-        ib_missing = []
-        for p in ib_all:
-            base = os.path.splitext(os.path.basename(p))[0]
-            in_synced = p in synced_ib_paths
-            under_anc = not in_synced and src_anc and (
-                p == src_anc or p.startswith(src_anc + "/"))
-            if under_anc:
-                rel = os.path.relpath(p, src_anc)
-                rp = os.path.basename(src_anc) if rel == "." \
-                    else os.path.join(os.path.basename(src_anc), rel)
-            else:
-                rp = p
-            if ibtool_compiles(os.path.join(self.proj_dir, p)):
-                resources.append((".process", rp))
-                # synced groups pre-exclude their IB files; an emitted one
-                # must not stay in exclude: (SwiftPM would drop it again)
-                excludes = [e for e in excludes if e != rp]
-                if not under_anc and not in_synced:
-                    self.mirror_file(p, target_dir, symlinks)
-            else:
-                excludes.append(rp)
-                ib_missing.append(p)
+        ib_missing = self._plan_ib_resources(
+            target_dir, ib_all, synced_ib_paths, src_anc,
+            symlinks, excludes, resources)
         if ib_missing:
             self.warn(f"{len(ib_missing)} Interface Builder resource(s) excluded "
                       "- Linux ibtool cannot compile them: "
                       + ", ".join(ib_missing))
-        ib_all = ib_missing
-        missing_ui = self.excluded_storyboard_in_plist(ib_all, infoplist_rel)
+        missing_ui = self.excluded_storyboard_in_plist(ib_missing, infoplist_rel)
         if missing_ui:
             self.warn(f"Info.plist references excluded storyboard {missing_ui!r}; "
                       "the launch/main UI will be missing from the bundle")
@@ -1098,6 +1101,33 @@ class Generator:
             target["name"], layers, intents) if intents else []
         if intent_swift_syms:
             symlinks.extend(intent_swift_syms)
+        return ib_missing
+
+    def plan_target_files(self, target_id, target):
+        """Returns (symlinks, excludes, resources, swift_rels, objc_hits).
+
+        symlinks: [(link_path_relative_to_out, destination_relative_to_project_dir)]
+        excludes/resources: paths relative to Sources/<Target>.
+        swift_rels: project-relative paths of the target's .swift files.
+        """
+        target_dir = f"Sources/{target['name']}"
+        swift_rels = []
+        layers = self.target_merged(target)
+        ipf = self.setting(layers, "INFOPLIST_FILE")
+        infoplist_rel = os.path.normpath(ipf) if ipf else None
+
+        symlinks, excludes, resources, swift_rels_g, ib_all, synced_ib_paths = \
+            self._plan_synced_groups(target_id, target, target_dir, infoplist_rel)
+        swift_rels += swift_rels_g
+        taken = {os.path.relpath(l, target_dir).split(os.sep)[0] for l, _ in symlinks}
+        self._plan_shared_exceptions(
+            target_id, target, target_dir, taken,
+            symlinks, excludes, resources, swift_rels)
+        res_files, src_anc = self._plan_phase_sources(
+            target, target_dir, symlinks, excludes, swift_rels)
+        self._plan_resources(target, layers, target_dir, res_files, src_anc,
+                             synced_ib_paths, infoplist_rel,
+                             symlinks, excludes, resources, ib_all)
         return symlinks, sorted(set(excludes)), resources, swift_rels
 
     def _generate_intent_swift(self, target_name, layers, intent_def_paths):
