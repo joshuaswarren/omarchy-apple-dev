@@ -2378,6 +2378,47 @@ def _xib_oid_arrays(b, values, keys, owner, nsapp, conn_objs):
     return values_arr, oids_keys_arr, oids_values_arr
 
 
+def _xib_connections(b, objects, owner, where, id_map, conns_arr, conn_objs,
+                     late_pending, late_menus):
+    """Classify and build every connection in Apple's order: outlets/actions
+    by source id ascending, bindings descending. Returns the binding key
+    pairs for the userDefaultsControllers."""
+    outlets, actions, bindings = [], [], []
+    for src_el, conn_el in _conn_blocks(objects):
+        if conn_el.tag == "binding":
+            bindings.append((src_el, conn_el))
+        elif conn_el.tag == "action":
+            actions.append((src_el, conn_el))
+        else:
+            outlets.append((src_el, conn_el))
+
+    # Outlets and actions both sort by SOURCE element id (ASCII), ties keep
+    # document order (probe TimelineTableView: -2 < MjV < opA outlets); the
+    # processing order drives lazy destination allocation.
+    outlets.sort(key=lambda p: (p[0].get("id") or "").encode())
+    for src_el, conn_el in outlets + sorted(
+            actions, key=lambda p: (p[0].get("id") or "").encode()):
+        if conn_el.tag == "action":
+            _xib_action_connector(b, objects, where, id_map, conn_objs,
+                                  conns_arr, late_menus, src_el, conn_el)
+            continue
+        _xib_outlet_connector(b, objects, owner, where, id_map, conn_objs,
+                              conns_arr, late_pending, late_menus,
+                              src_el, conn_el)
+    # Bindings sort by SOURCE element id DESCENDING (probe GeneralPreferences:
+    # wtY, Yrc, Ubm, UI6, Jwn, 6pw); outlets/actions keep ascending order.
+    bind_key_pairs = []
+    for src_el, conn_el in sorted(
+            bindings, key=lambda p: (p[0].get("id") or "").encode(), reverse=True):
+        c, key_pair = _xib_binding_connector(b, objects, owner, where,
+                                             id_map, src_el, conn_el)
+        if key_pair:
+            bind_key_pairs.append(key_pair)
+        conns_arr.add("UINibEncoderEmptyKey", *b.ref(c))
+        conn_objs.append(c)
+    return bind_key_pairs
+
+
 def compile_xib(path):
     """Compile one macOS xib to NIBArchive bytes. Raises XibError."""
     doc, objects, where = _xib_parse(path)
@@ -2413,39 +2454,9 @@ def compile_xib(path):
     _xib_stackview_connector(b, objects, where, id_map, conns_arr, conn_objs,
                              late_pending)
 
-    outlets, actions, bindings = [], [], []
-    for src_el, conn_el in _conn_blocks(objects):
-        if conn_el.tag == "binding":
-            bindings.append((src_el, conn_el))
-        elif conn_el.tag == "action":
-            actions.append((src_el, conn_el))
-        else:
-            outlets.append((src_el, conn_el))
-
-    # Outlets and actions both sort by SOURCE element id (ASCII), ties keep
-    # document order (probe TimelineTableView: -2 < MjV < opA outlets); the
-    # processing order drives lazy destination allocation.
-    outlets.sort(key=lambda p: (p[0].get("id") or "").encode())
-    for src_el, conn_el in outlets + sorted(
-            actions, key=lambda p: (p[0].get("id") or "").encode()):
-        if conn_el.tag == "action":
-            _xib_action_connector(b, objects, where, id_map, conn_objs,
-                                  conns_arr, late_menus, src_el, conn_el)
-            continue
-        _xib_outlet_connector(b, objects, owner, where, id_map, conn_objs,
-                              conns_arr, late_pending, late_menus,
-                              src_el, conn_el)
-    # Bindings sort by SOURCE element id DESCENDING (probe GeneralPreferences:
-    # wtY, Yrc, Ubm, UI6, Jwn, 6pw); outlets/actions keep ascending order.
-    bind_key_pairs = []
-    for src_el, conn_el in sorted(
-            bindings, key=lambda p: (p[0].get("id") or "").encode(), reverse=True):
-        c, key_pair = _xib_binding_connector(b, objects, owner, where,
-                                             id_map, src_el, conn_el)
-        if key_pair:
-            bind_key_pairs.append(key_pair)
-        conns_arr.add("UINibEncoderEmptyKey", *b.ref(c))
-        conn_objs.append(c)
+    bind_key_pairs = _xib_connections(
+        b, objects, owner, where, id_map, conns_arr, conn_objs,
+        late_pending, late_menus)
     for late, parent_id in late_pending:
         late.obj = id_map[parent_id]
 
