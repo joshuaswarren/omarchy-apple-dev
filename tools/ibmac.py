@@ -1682,14 +1682,9 @@ def _build_element(b, el, where, superview, id_map, guides, parent=None, root=Fa
         return _window(b, el, where, id_map, parent=parent)
     raise I.XibError(f"unsupported element <{el.tag}> ({where})")
 
-
-def _window(b, el, where, id_map, parent=None, obj=None):
-    """<window> -> NSWindowTemplate with the probed key order.
-
-    obj is pre-allocated for a visible-at-launch window: the canvas inlines
-    the whole content tree right after the window head (probe About), with the
-    window in NSVisibleWindows and the trailing keys after the tree."""
-    o = obj if obj is not None else b.new("NSWindowTemplate")
+def _window_head_keys(b, el, o, where):
+    """Style mask, backing, rect and the window flags block; returns
+    (min_sz, max_sz) content size strings."""
     mask = el.find("windowStyleMask[@key='styleMask']")
     style = 0
     if mask is not None:
@@ -1733,18 +1728,12 @@ def _window(b, el, where, id_map, parent=None, obj=None):
         o.add("NSWindowContentMaxSize", *b.ref(b.string(max_sz)))
     if min_sz is not None:
         o.add("NSWindowContentMinSize", *b.ref(b.string(min_sz)))
-    cv = el.find("view[@key='contentView']")
-    cv_pairs = []
-    if cv is not None:
-        if obj is not None:
-            cv_obj, cv_pairs = _window_content(b, el, cv, o, where, id_map)
-            o.add("NSWindowView", *b.ref(cv_obj))
-    else:
-        b.cv_rect = None
-        o.add("NSWindowView", *(N.NIL, None))
-    if cv is not None and obj is None:
-        cv_obj, cv_pairs = _window_content(b, el, cv, o, where, id_map)
-        o.add("NSWindowView", *b.ref(cv_obj))
+    return min_sz, max_sz
+
+
+def _window_tail_keys(b, el, o, where, min_sz, max_sz):
+    """Trailing window keys: screen rect, min/max with title bar delta,
+    autosave, collection behavior, restorable, titlebar and style keys."""
     o.add("NSScreenRect", *b.ref(b.string(_rect(el, "screenRect", where))))
     if min_sz is not None:
         # content min/max plus the title bar: +24 for NSPanels (probe
@@ -1792,6 +1781,29 @@ def _window(b, el, where, id_map, parent=None, obj=None):
         o.add("NSWindowToolbarStyle", *b.int8(TOOLBAR_STYLE[el.get("toolbarStyle")]))
     if el.get("customClass"):
         o.add("IBClassReference", *b.ref(_classref(b, el.get("customClass"), None, None)))
+
+
+def _window(b, el, where, id_map, parent=None, obj=None):
+    """<window> -> NSWindowTemplate with the probed key order.
+
+    obj is pre-allocated for a visible-at-launch window: the canvas inlines
+    the whole content tree right after the window head (probe About), with the
+    window in NSVisibleWindows and the trailing keys after the tree."""
+    o = obj if obj is not None else b.new("NSWindowTemplate")
+    min_sz, max_sz = _window_head_keys(b, el, o, where)
+    cv = el.find("view[@key='contentView']")
+    cv_pairs = []
+    if cv is not None:
+        if obj is not None:
+            cv_obj, cv_pairs = _window_content(b, el, cv, o, where, id_map)
+            o.add("NSWindowView", *b.ref(cv_obj))
+    else:
+        b.cv_rect = None
+        o.add("NSWindowView", *(N.NIL, None))
+    if cv is not None and obj is None:
+        cv_obj, cv_pairs = _window_content(b, el, cv, o, where, id_map)
+        o.add("NSWindowView", *b.ref(cv_obj))
+    _window_tail_keys(b, el, o, where, min_sz, max_sz)
     id_map[el.get("id")] = o
     return o, [(o, parent)] + cv_pairs
 
