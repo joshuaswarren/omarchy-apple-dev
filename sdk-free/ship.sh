@@ -4,7 +4,7 @@
 # identity and an App Store profile, validate offline, optionally upload.
 #   sdk-free/ship.sh [--upload] <flutter app dir>
 # The App Store record must exist once for the bundle id (web UI; the API cannot create
-# apps). Same account variables as ship.sh:
+# apps; exact steps: sdk-free/asc-app-records.md). Same account variables as ship.sh:
 #   ASC_KEY_ID=XXXXXXXXXX  ASC_ISSUER_ID=<uuid>  ASC_KEY_PATH=/path/AuthKey_XXXXXXXXXX.p8
 # BUILD_NUMBER overrides CFBundleVersion (default: UTC yyyymmddHHMM, always increasing).
 # XCODE_VERSION/XCODE_BUILD stamp DTXcode when the SDK has no recorded version.
