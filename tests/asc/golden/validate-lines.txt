@@ -1,0 +1,25 @@
+FAIL Assets.car has the App Store 1024 icon (1024x1024)
+FAIL Assets.car present (0 rendition sizes)
+FAIL LC_CODE_SIGNATURE present
+FAIL embedded.mobileprovision present
+ok   CFBundleIcons names the primary icon (CFBundleIconName)
+ok   CFBundlePackageType is APPL
+ok   CFBundleShortVersionString '1.2' is up to three integers
+ok   CFBundleSupportedPlatforms is [iPhoneOS]
+ok   CFBundleVersion '3' is up to three integers
+ok   DTXcode 2700 / 27A266a
+ok   Info.plist has the required keys
+ok   Info.plists have no unresolved $(...) placeholders
+ok   LC_BUILD_VERSION iOS minos (17, 0, 0) <= MinimumOSVersion 17.0
+ok   LC_BUILD_VERSION sdk (26, 0, 0) is iOS 26 or later (ITMS-90725)
+ok   UIDeviceFamily [1] has only iPhone/iPad (ITMS-90100)
+ok   app extensions carry no Frameworks/ (ITMS-90206)
+ok   arm64 MH_EXECUTE
+ok   built against the device SDK: iphoneos27.0
+ok   every entry is under Payload/
+ok   exactly one app bundle in Payload/: ['Fixture.app']
+ok   executable Fixture is a thin 64-bit Mach-O
+ok   launch screen declared
+ok   no __MACOSX or .DS_Store
+ok   no loose dylibs in Frameworks/ (ITMS-90426)
+ok   position independent (MH_PIE)

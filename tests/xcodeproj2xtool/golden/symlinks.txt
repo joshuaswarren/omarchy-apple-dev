@@ -1,0 +1,2 @@
+./FixtureApp/iOS -> ../../../proj/iOS
+./FixtureApp/shared -> ../../../proj/shared

@@ -1,0 +1,168 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	objectVersion = 54;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		111100000000000000000001 /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = 222200000000000000000001 /* App.swift */; };
+		111100000000000000000002 /* Second.swift in Sources */ = {isa = PBXBuildFile; fileRef = 222200000000000000000002 /* Second.swift */; };
+		111100000000000000000003 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 222200000000000000000003 /* Localizable.xcstrings */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		222200000000000000000001 /* App.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = App.swift; sourceTree = "<group>"; };
+		222200000000000000000002 /* Second.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = Second.swift; sourceTree = "<group>"; };
+		222200000000000000000003 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
+		222200000000000000000004 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		222200000000000000000005 /* Config.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config.xcconfig; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		333300000000000000000001 /* main */ = {
+			isa = PBXGroup;
+			children = (
+				333300000000000000000002 /* iOS */,
+				444400000000000000000001 /* shared */,
+				222200000000000000000005 /* Config.xcconfig */,
+			);
+			sourceTree = "<group>";
+		};
+		333300000000000000000002 /* iOS */ = {
+			isa = PBXGroup;
+			children = (
+				222200000000000000000001 /* App.swift */,
+				222200000000000000000002 /* Second.swift */,
+				222200000000000000000003 /* Localizable.xcstrings */,
+				222200000000000000000004 /* Info.plist */,
+			);
+			path = iOS;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		444400000000000000000001 /* shared */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = shared; sourceTree = "<group>"; };
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXNativeTarget section */
+		555500000000000000000001 /* FixtureApp */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 666600000000000000000001;
+			buildPhases = (
+				777700000000000000000001 /* Sources */,
+				777700000000000000000002 /* Resources */,
+			);
+			name = FixtureApp;
+			packageProductDependencies = (
+				888800000000000000000001 /* DemoKit */,
+			);
+			productName = FixtureApp;
+			productType = "com.apple.product-type.application";
+			fileSystemSynchronizedGroups = (
+				444400000000000000000001 /* shared */,
+			);
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		999900000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				LastSwiftUpdateCheck = 2700;
+			};
+			buildConfigurationList = 666600000000000000000002;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 333300000000000000000001;
+			packageReferences = (
+				888800000000000000000002 /* XCLocalSwiftPackageReference "DemoPkg" */,
+			);
+			targets = (
+				555500000000000000000001 /* FixtureApp */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		777700000000000000000002 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			files = (
+				111100000000000000000003 /* Localizable.xcstrings in Resources */,
+			);
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		777700000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+				111100000000000000000001 /* App.swift in Sources */,
+				111100000000000000000002 /* Second.swift in Sources */,
+			);
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		101000000000000000000001 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = iOS/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 2.5;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(BUNDLE_PREFIX).fixture";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		101000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 222200000000000000000005 /* Config.xcconfig */;
+			buildSettings = {
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		666600000000000000000001 /* Build configuration list for PBXNativeTarget "FixtureApp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				101000000000000000000001 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		666600000000000000000002 /* Build configuration list for PBXProject "FixtureApp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				101000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		888800000000000000000002 /* XCLocalSwiftPackageReference "DemoPkg" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = DemoPkg;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		888800000000000000000001 /* DemoKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DemoKit;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 999900000000000000000001 /* Project object */;
+}

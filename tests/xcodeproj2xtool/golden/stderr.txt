@@ -1,0 +1,2 @@
+adapter is outside @ROOT@/proj; no .bsp written there
+warning: FixtureApp Info.plist dropped ['CFBundleExecutable', 'CFBundleIdentifier'] (the first two are set by xtool from the product name and bundleID; the rest use build settings the generator cannot resolve)

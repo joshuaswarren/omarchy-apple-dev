@@ -1,0 +1,2 @@
+APP_ICON=AppIcon   # pass to ship.sh
+wrote @ROOT@/gen (Package.swift, xtool.yml, xtool.env, 2 symlinks under Sources/, 0 extensions)
