@@ -1087,45 +1087,8 @@ def _number_formatter(b, el, where):
     o.add("NS.allowsfloats", *b.boolean(False))
     return o
 
-
-def _field(b, el, where, superview, id_map, parent=None):
-    """<textField>/<secureTextField>: NSTextField/NSSecureTextField
-    (NSClassSwapper when customClass, probe About LinkLabel) with its cell;
-    returns (obj, [(obj, parent)])."""
-    guides = {}
-    secure = el.tag == "secureTextField"
-    o = b.new("NSClassSwapper" if el.get("customClass")
-              else "NSSecureTextField" if secure else "NSTextField")
-    if el.get("customClass"):
-        o.add("NSClassName", *b.ref(b.string(I._swift_class(el))))
-        o.add("NSOriginalClassName",
-              *b.ref(b.string("NSSecureTextField" if secure else "NSTextField")))
-    o.add("NSNextResponder", *(b.ref(superview) if superview is not None else (N.NIL, None)))
-    o.add("NSNibTouchBar", *(N.NIL, None))
-    v, vt = _vflags(el, where)
-    o.add("NSvFlags", vt, v)
-    o.add("NSFrame", *b.ref(b.string(_rect(el, "frame", where))))
-    o.add("NSSuperview", *b.ref(superview))
-    if el.get("wantsLayer") == "YES":
-        # probe ActivityLog label [98]: any view-kind element with wantsLayer
-        o.add("NSViewIsLayerTreeHost", *b.boolean(False))
-    o.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
-    if _translates(el):
-        o.add("NSDoNotTranslateAutoresizingMask", *b.boolean(False))
-    # probe FeedInspector [38]: the constraints array precedes the priority
-    # strings on textFields
-    cons_el = el.find("constraints")
-    cons = []
-    if cons_el is not None and cons_el.findall("constraint"):
-        carr = b.new("NSArray")
-        carr.add("NSInlinedValue", *b.boolean(False))
-        els = I._constraint_order(el, cons_el.findall("constraint"), where, mac=True)
-        for c in els:
-            con = _constraint(b, c, o, el.get("id"), id_map, guides, {}, where)
-            carr.add("UINibEncoderEmptyKey", *b.ref(con))
-            cons.append(con)
-        b.cons_order[el.get("id")] = [c.get("id") for c in els]
-        o.add("NSViewConstraints", *b.ref(carr))
+def _priority_keys(b, el, o):
+    """NSHuggingPriority / NSAntiCompressionPriority when off-default."""
     h, v2 = el.get("horizontalHuggingPriority"), el.get("verticalHuggingPriority")
     if (h is not None and h != "250") or (v2 is not None and v2 != "750"):
         o.add("NSHuggingPriority",
@@ -1135,10 +1098,11 @@ def _field(b, el, where, superview, id_map, parent=None):
     if (h is not None and h != "750") or (v2 is not None and v2 != "750"):
         o.add("NSAntiCompressionPriority",
               *b.ref(b.string("{%s, %s}" % (_fmt_g(h or 750), _fmt_g(v2 or 750)))))
-    o.add("IBNSSafeAreaLayoutGuide", *(N.NIL, None))
-    o.add("IBNSLayoutMarginsGuide", *(N.NIL, None))
-    o.add("IBNSClipsToBounds", *b.int8(0))
-    o.add("NSEnabled", *b.boolean(False))
+
+
+def _field_cell(b, el, o, where, id_map, secure):
+    """The textField's cell with its input-locale and completion extras;
+    returns (cell_el, cell)."""
     cell_el = el.find("textFieldCell[@key='cell']")
     if cell_el is None:
         cell_el = el.find("secureTextFieldCell[@key='cell']")
@@ -1164,6 +1128,41 @@ def _field(b, el, where, superview, id_map, parent=None):
         cell.add("NSAutomaticTextCompletionDisabled", *b.boolean(False))
     o.add("NSCell", *b.ref(cell))
     id_map[el.get("id") + "#cell"] = cell
+    return cell_el, cell
+
+
+def _field(b, el, where, superview, id_map, parent=None):
+    """<textField>/<secureTextField>: NSTextField/NSSecureTextField
+    (NSClassSwapper when customClass, probe About LinkLabel) with its cell;
+    returns (obj, [(obj, parent)])."""
+    secure = el.tag == "secureTextField"
+    o = b.new("NSClassSwapper" if el.get("customClass")
+              else "NSSecureTextField" if secure else "NSTextField")
+    if el.get("customClass"):
+        o.add("NSClassName", *b.ref(b.string(I._swift_class(el))))
+        o.add("NSOriginalClassName",
+              *b.ref(b.string("NSSecureTextField" if secure else "NSTextField")))
+    o.add("NSNextResponder", *(b.ref(superview) if superview is not None else (N.NIL, None)))
+    o.add("NSNibTouchBar", *(N.NIL, None))
+    v, vt = _vflags(el, where)
+    o.add("NSvFlags", vt, v)
+    o.add("NSFrame", *b.ref(b.string(_rect(el, "frame", where))))
+    o.add("NSSuperview", *b.ref(superview))
+    if el.get("wantsLayer") == "YES":
+        # probe ActivityLog label [98]: any view-kind element with wantsLayer
+        o.add("NSViewIsLayerTreeHost", *b.boolean(False))
+    o.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
+    if _translates(el):
+        o.add("NSDoNotTranslateAutoresizingMask", *b.boolean(False))
+    # probe FeedInspector [38]: the constraints array precedes the priority
+    # strings on textFields
+    cons = _ordered_constraints(b, el, o, where, id_map)
+    _priority_keys(b, el, o)
+    o.add("IBNSSafeAreaLayoutGuide", *(N.NIL, None))
+    o.add("IBNSLayoutMarginsGuide", *(N.NIL, None))
+    o.add("IBNSClipsToBounds", *b.int8(0))
+    o.add("NSEnabled", *b.boolean(False))
+    cell_el, cell = _field_cell(b, el, o, where, id_map, secure)
     o.add("NSAllowsLogicalLayoutDirection",
           *b.boolean(not b.localize
                      and (el.get("horizontalHuggingPriority") is not None
@@ -1297,18 +1296,9 @@ def _view_constraints_and_guides(b, el, o, where, id_map, guides, keys):
             carr.add("UINibEncoderEmptyKey", *b.ref(c))
         o.add("NSViewConstraints", *b.ref(carr))
         keys.extend((c, o) for c in cons)
-    h = el.get("horizontalHuggingPriority")
-    v2 = el.get("verticalHuggingPriority")
-    if (h is not None and h != "250") or (v2 is not None and v2 != "750"):
-        # probe GeneralPreferencesView root swapper: {1000, 1000} both keys,
-        # between NSViewConstraints and the guide keys
-        o.add("NSHuggingPriority",
-              *b.ref(b.string("{%s, %s}" % (_fmt_g(h or 250), _fmt_g(v2 or 750)))))
-    h = el.get("horizontalCompressionResistancePriority")
-    v2 = el.get("verticalCompressionResistancePriority")
-    if (h is not None and h != "750") or (v2 is not None and v2 != "750"):
-        o.add("NSAntiCompressionPriority",
-              *b.ref(b.string("{%s, %s}" % (_fmt_g(h or 750), _fmt_g(v2 or 750)))))
+    # probe GeneralPreferencesView root swapper: {1000, 1000} both keys,
+    # between NSViewConstraints and the guide keys
+    _priority_keys(b, el, o)
     if gl:
         larr = b.new("NSArray")
         larr.add("NSInlinedValue", *b.boolean(False))
