@@ -42,11 +42,17 @@ Cable out, Wi-Fi on, from the M1 Max laptop (Swift 6.4 lldb, no on-disk device s
 - `dvt launch --suspended` returned a pid, `developer debugserver start-server` forwarded to a local port.
 - `process connect` and `process attach` worked; the process stopped at `_dyld_start` in dyld.
 - `breakpoint set -n main` resolved to `main` in SwiftUIWide1 when the local binary matched the installed build.
-- Not reached: the stop at the breakpoint. After `continue`, lldb read system libraries from process memory
+- Without a sysroot: after `continue`, lldb read system libraries from process memory
   (`libobjc.A.dylib is being read from process memory ... could not find the on-disk shared cache`) and the 150 s
-  limit passed first. The repo's USB flow downloads the device's dyld shared cache once per iOS build
-  (`developer fetch-symbols download`) to avoid this.
-  The cache for iPhone16,2 build 24A446 (from Apple's public IPSW, `ipsw extract --dyld`) is 81 files, 6.7 GB on disk (`du -sh`).
+  limit passed first. The cache for iPhone16,2 build 24A446 (from Apple's public IPSW, `ipsw extract --dyld`) is
+  81 files, 6.7 GB on disk (`du -sh`).
+- Sysroot built from that cache with `ipsw dyld extract --slide` for the 80 libraries under `/usr/lib/swift` and
+  `/usr/lib/libobjc*`: 70 MB (`du -sh`). With `platform select remote-ios --sysroot`, the warning is gone and `continue`
+  runs the app (process state running for 60 s).
+- Still not shown: a stop at a breakpoint. Three runs with the sysroot: `breakpoint set -r` on the mangled body name found no
+  location; `breakpoint set -n main` resolved to `0x1024ec444` (run 4) and the app ran past it with no stop; `bt` then
+  reported "requires a process which is currently stopped". Cause unknown (not yet checked: debugserver's reply to the
+  breakpoint insert, lldb's image slide at `_dyld_start`).
 - After every run the app was killed, the forwarder and tunnel were stopped, and `proclist` showed no app or debugserver
   left on the phone.
 

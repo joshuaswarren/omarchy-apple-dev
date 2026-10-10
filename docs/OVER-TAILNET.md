@@ -70,10 +70,23 @@ Measured (cable out, Wi-Fi on): the tunnel carries `dvt launch --suspended`, `de
 `process connect` and `process attach`. The process stops at `_dyld_start`, and `breakpoint set -n main` resolves to your app
 when the local binary matches the installed build.
 
-Not yet shown: a stop at the breakpoint. Without the on-disk device sysroot, lldb reads every system library from process
-memory, and those reads cross the tunnel; it had not reached `main` after 150 seconds. Fetch the sysroot once per
-iOS build (`pymobiledevice3 developer fetch-symbols download DIR --rsd ADDR PORT`, several GB; the cache for this build is 6.7 GB, then extract the Swift and
-Objective-C dylibs as `device-run.sh --lldb` does) and rerun. The result of that run goes in the receipt.
+**Sysroot (needed).** Without the device's on-disk system libraries, lldb reads them from process memory across the tunnel
+and had not reached `main` after 150 seconds. With the sysroot in
+`~/.cache/omarchy-apple-dev/DeviceSupport/<version> (<build>)/Symbols` and `platform select remote-ios --sysroot <that dir>`,
+the "read from process memory" warning is gone and `continue` runs the app. Build the sysroot once per iOS build, with no
+phone traffic, from Apple's public IPSW cache (the same cache `sdk-free/setup.sh --ipsw` downloads; 6.7 GB for 24A446):
+
+```sh
+ipsw dyld info dyld_shared_cache_arm64e --dylibs | grep -o '/[^ ]*$' | grep -E '^/usr/lib/(swift/|libobjc)' > dylibs.txt
+while read -r p; do mkdir -p "Symbols$(dirname "$p")"; \
+  ipsw dyld extract dyld_shared_cache_arm64e "$(basename "$p")" --slide -o "Symbols$(dirname "$p")"; done < dylibs.txt
+```
+
+That gave 80 libraries, 70 MB. Copy only that folder to the host that runs lldb, then delete the cache.
+
+**Not yet shown: a stop at a breakpoint over the tunnel.** With the sysroot, `breakpoint set -n main` resolved but the app ran
+past it (process state running for 60 seconds, no stop), and a regex on the app's SwiftUI `body` getter found no location.
+The cause is not known. Over USB the same breakpoint flow stops (receipts/2026-10-08-device-run-lldb-userspace.md).
 
 Always end a debug session by killing the app (`developer dvt pkill --bundle BUNDLE_ID --rsd ADDR PORT`) so the phone is not
 left with a suspended app.
