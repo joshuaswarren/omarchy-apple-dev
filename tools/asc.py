@@ -577,6 +577,253 @@ def placeholder_hits(node, where=""):
     return []
 
 
+def _check_bundle_layout(check, names, apps):
+    """Zip layout: everything under Payload/, no junk, exactly one .app."""
+    check(all(n.startswith("Payload/") for n in names), "every entry is under Payload/")
+    check(not any("__MACOSX" in n or n.endswith(".DS_Store") for n in names), "no __MACOSX or .DS_Store")
+    if not check(len(apps) == 1, f"exactly one app bundle in Payload/: {apps}"):
+        sys.exit(1)
+
+
+def _check_bundle_contents(check, app, rcodesign):
+    """Frameworks: extensions carry none, no loose dylibs, FMWK + signed."""
+    nested = sorted(p.parent.name for p in app.glob("PlugIns/*.appex/Frameworks"))
+    check(not nested, f"app extensions carry no Frameworks/ (ITMS-90206){': ' + ', '.join(nested) if nested else ''}")
+    loose = sorted(p.name for p in app.glob("Frameworks/*.dylib"))
+    check(not loose, f"no loose dylibs in Frameworks/ (ITMS-90426){': ' + ', '.join(loose) if loose else ''}")
+    for framework in sorted(app.glob("Frameworks/*.framework")):
+        with (framework / "Info.plist").open("rb") as f:
+            finfo = plistlib.load(f)
+        fexe = framework / finfo.get("CFBundleExecutable", "")
+        fverify = subprocess.run([rcodesign, "verify", str(fexe)], capture_output=True, text=True, check=False)
+        check(finfo.get("CFBundlePackageType") == "FMWK" and fexe.is_file() and fverify.returncode == 0,
+              f"framework {framework.name}: FMWK Info.plist, signed executable")
+
+
+def _check_info_plist(check, app, info):
+    """The app Info.plist: required keys, placeholders, versions, UI keys.
+    Returns True when iPad is a target family (sizes the icon checks)."""
+    missing = [k for k in REQUIRED_INFO_KEYS if k not in info]
+    check(not missing, f"Info.plist has the required keys{': missing ' + ', '.join(missing) if missing else ''}")
+    unresolved = []
+    for ipath in sorted(app.rglob("Info.plist")):
+        with ipath.open("rb") as f:
+            for where in placeholder_hits(plistlib.load(f)):
+                unresolved.append(f"{ipath.relative_to(app)}:{where or '/'}")
+    check(not unresolved,
+          "Info.plists have no unresolved $(...) placeholders"
+          f"{': ' + '; '.join(unresolved) if unresolved else ''}")
+    number = re.compile(r"^\d+(\.\d+){0,2}$")
+    short, build = info.get("CFBundleShortVersionString", ""), info.get("CFBundleVersion", "")
+    check(bool(number.match(short)), f"CFBundleShortVersionString '{short}' is up to three integers")
+    check(bool(number.match(build)), f"CFBundleVersion '{build}' is up to three integers")
+    check(info.get("CFBundlePackageType") == "APPL", "CFBundlePackageType is APPL")
+    check(info.get("CFBundleSupportedPlatforms") == ["iPhoneOS"], "CFBundleSupportedPlatforms is [iPhoneOS]")
+    check(info.get("DTPlatformName") == "iphoneos" and str(info.get("DTSDKName", "")).startswith("iphoneos"),
+          f"built against the device SDK: {info.get('DTSDKName')}")
+    check(str(info.get("DTXcode", "")).isdigit(), f"DTXcode {info.get('DTXcode')} / {info.get('DTXcodeBuild')}")
+    check("UILaunchScreen" in info or "UILaunchStoryboardName" in info, "launch screen declared")
+    # App Store processing checks UIMainStoryboardFile (90029, Mastodon). NetNewsWire build ad8849b0 was
+    # VALID with UILaunchStoryboardName and its scene manifest naming storyboards that were missing.
+    for name in sorted({v for k, v in info.items() if k.split("~")[0] == "UIMainStoryboardFile"}):
+        found = [p for p in app.glob(f"**/{name}*.storyboardc")
+                 if p.name in (f"{name}.storyboardc", f"{name}~iphone.storyboardc", f"{name}~ipad.storyboardc")]
+        check(bool(found), f"UIMainStoryboardFile '{name}' is compiled in the bundle (ITMS-90029)")
+    families = info.get("UIDeviceFamily", [])
+    check(bool(families) and set(families) <= {1, 2}, f"UIDeviceFamily {families} has only iPhone/iPad (ITMS-90100)")
+    ipad = 2 in families
+    if ipad and not info.get("UIRequiresFullScreen"):
+        check(IPAD_ORIENTATIONS <= set(info.get("UISupportedInterfaceOrientations~ipad", [])),
+              "iPad multitasking: all four iPad orientations declared")
+    return ipad
+
+
+def _check_executable(check, app, info, exe):
+    """The app executable: thin arm64 PIE Mach-O built for the device SDK."""
+    header = macho(exe) if exe.is_file() else None
+    if check(header is not None, f"executable {exe.name} is a thin 64-bit Mach-O"):
+        cputype, filetype, mh_flags, minos, sdk, signed = header
+        check(cputype == 0x0100000C and filetype == 2, "arm64 MH_EXECUTE")
+        check(bool(mh_flags & 0x200000), "position independent (MH_PIE)")
+        plist_min = version_tuple(info.get("MinimumOSVersion", "0"))
+        check(minos is not None and minos <= plist_min,
+              f"LC_BUILD_VERSION iOS minos {minos} <= MinimumOSVersion {info.get('MinimumOSVersion')}")
+        check(sdk is not None and sdk >= (26, 0, 0), f"LC_BUILD_VERSION sdk {sdk} is iOS 26 or later (ITMS-90725)")
+        check(signed, "LC_CODE_SIGNATURE present")
+    check_app_intents(check, app, exe)
+
+
+def _check_assets(check, app, info, ipad):
+    """Assets.car and the icon set: App Store 1024 (plus phone/iPad sizes when
+    a multi-size set is present), primary icon name, declared icon files."""
+    car = app / "Assets.car"
+    sizes = {(w, h) for w, h, _ in car_renditions(car)} if car.exists() else set()
+    check(car.exists(), f"Assets.car present ({len(sizes)} rendition sizes)")
+    # actool 27.0 stores only the 1024 icon for a single-size AppIcon (the form App Store
+    # processing accepted, FINDINGS.md 35); a multi-size set must then be complete.
+    needed = {(1024, 1024): "App Store 1024"}
+    if sizes & {(120, 120), (180, 180), (152, 152), (167, 167)}:
+        needed[(120, 120)] = "iPhone 60@2x"
+        if ipad:
+            needed.update({(152, 152): "iPad 76@2x", (167, 167): "iPad Pro 83.5@2x"})
+    for size, label in needed.items():
+        check(size in sizes, f"Assets.car has the {label} icon ({size[0]}x{size[1]})")
+    primary = info.get("CFBundleIcons", {}).get("CFBundlePrimaryIcon", {})
+    check(bool(primary.get("CFBundleIconName")), "CFBundleIcons names the primary icon (CFBundleIconName)")
+    marketing = app / f"{primary.get('CFBundleIconName', 'AppIcon')}1024x1024.png"
+    if marketing.exists():
+        check(not png_info(marketing)[2], "App Store icon has no alpha channel")
+    for stem in primary.get("CFBundleIconFiles", []):
+        check(any(app.glob(f"{stem}*.png")), f"declared icon file {stem}*.png is in the bundle")
+
+
+def _check_profile(check, app, info, exe, rcodesign):
+    """embedded.mobileprovision: app id coverage, App Store kind, validity,
+    then the executable's signature against it. Skips to the seals when the
+    profile is missing."""
+    prov_path = app / "embedded.mobileprovision"
+    if not check(prov_path.exists(), "embedded.mobileprovision present"):
+        return
+    prov = profile_payload(prov_path.read_bytes())
+    team = (prov.get("TeamIdentifier") or [""])[0]
+    granted = prov.get("Entitlements", {})
+    app_id = granted.get("application-identifier", "")
+    check(app_id in (f"{team}.{info.get('CFBundleIdentifier')}", f"{team}.*"),
+          f"profile app id {app_id} covers {info.get('CFBundleIdentifier')}")
+    check("ProvisionedDevices" not in prov and not prov.get("ProvisionsAllDevices"),
+          "App Store profile (no device list, not enterprise)")
+    check(granted.get("get-task-allow") is False, "profile get-task-allow is false")
+    expires = prov["ExpirationDate"].replace(tzinfo=datetime.timezone.utc)
+    check(expires > datetime.datetime.now(datetime.timezone.utc), f"profile valid until {expires:%Y-%m-%d}")
+    if prov.get("TeamName") == "omarchy-apple-dev TEST":
+        print("note TEST identity: structure only; Apple rejects this signature")
+    _check_signature_seals(check, app, exe, rcodesign, prov, team, app_id)
+
+
+def _check_signature_seals(check, root, exe, rcodesign, prov, team, app_id):
+    """The app executable's signature against its profile: rcodesign verify,
+    CodeDirectory team, sealed Info.plist/CodeResources hashes, sealed file
+    set, signed entitlements, signing certificate."""
+    granted = prov.get("Entitlements", {})
+    verify = subprocess.run([rcodesign, "verify", str(exe)], capture_output=True, text=True, check=False)
+    check(verify.returncode == 0,
+          f"rcodesign verify {exe.name}{'' if verify.returncode == 0 else ': ' + verify.stderr.strip()[-200:]}")
+    cd = subprocess.run([rcodesign, "extract", "code-directory", str(exe)],
+                        capture_output=True, text=True, check=True).stdout
+    cd_team = re.search(r'team_name: Some\(\s*"([^"]*)"', cd)
+    check(bool(cd_team) and cd_team.group(1) == team,
+          f"CodeDirectory team id {cd_team.group(1) if cd_team else None} matches the profile")
+    slots = dict(re.findall(r"(Info|Resources) \(\d\): ([0-9a-f]{64})", cd))
+    seal = root / "_CodeSignature" / "CodeResources"
+    check(slots.get("Info") == hashlib.sha256((root / "Info.plist").read_bytes()).hexdigest(),
+          "Info.plist matches its sealed hash")
+    check(seal.exists() and slots.get("Resources") == hashlib.sha256(seal.read_bytes()).hexdigest(),
+          "_CodeSignature/CodeResources matches its sealed hash")
+    files2 = plistlib.loads(seal.read_bytes()).get("files2", {}) if seal.exists() else {}
+    changed = [p for p, v in files2.items() if not (isinstance(v, dict) and v.get("optional")) and (
+        not (root / p).is_file()
+        or (v["hash2"] if isinstance(v, dict) else v) != hashlib.sha256((root / p).read_bytes()).digest())]
+    unsealed = [str(p.relative_to(root)) for p in root.rglob("*") if p.is_file()
+                and str(p.relative_to(root)) not in files2
+                and p not in (exe, root / "Info.plist", root / "PkgInfo")
+                and p.relative_to(root).parts[0] != "_CodeSignature"]
+    check(not changed and not unsealed, "every bundle file is sealed with a matching hash"
+          f"{f'; changed {changed}' if changed else ''}{f'; unsealed {unsealed}' if unsealed else ''}")
+    xml = signature_blob(rcodesign, exe, b"\xfa\xde\x71\x71")
+    signed_ent = plistlib.loads(xml) if xml else {}
+    check(signed_ent.get("application-identifier") == app_id
+          and signed_ent.get("com.apple.developer.team-identifier") == team,
+          f"signed entitlements match the profile: {signed_ent.get('application-identifier')}")
+    check(signed_ent.get("get-task-allow") is False, "signed get-task-allow is false")
+    extra = set(signed_ent) - set(granted)
+    check(not extra,
+          f"signed entitlements are a subset of the profile{': extra ' + str(extra) if extra else ''}")
+    cms = subprocess.run([rcodesign, "extract", "cms-pem", str(exe)], capture_output=True, check=True).stdout
+    signers = {c.public_bytes(serialization.Encoding.DER) for c in pkcs7.load_pem_pkcs7_certificates(cms)}
+    check(bool(signers & set(prov.get("DeveloperCertificates", []))),
+          "signing certificate is one of the profile's DeveloperCertificates")
+
+
+def _check_appex(check, app, info, appex, rcodesign):
+    """One embedded extension: build-environment and version match with the
+    app, declared UI compiled, then its own profile and signature."""
+    with (appex / "Info.plist").open("rb") as f:
+        ainfo = plistlib.load(f)
+    check(ainfo.get("DTPlatformName") == "iphoneos" and ainfo.get("DTXcode") == info.get("DTXcode"),
+          f"appex {appex.name}: build-environment keys (ITMS-90507)")
+    check(ainfo.get("CFBundleVersion") == info.get("CFBundleVersion")
+          and ainfo.get("CFBundleShortVersionString") == info.get("CFBundleShortVersionString"),
+          f"appex {appex.name}: versions match the app (ITMS-90473)")
+    check("arm64" in ainfo.get("UIRequiredDeviceCapabilities", []),
+          f"appex {appex.name}: UIRequiredDeviceCapabilities has arm64 (ITMS-90502)")
+    extension = ainfo.get("NSExtension", {})
+    if storyboard := extension.get("NSExtensionMainStoryboard"):
+        check(any(appex.glob(f"**/{storyboard}.storyboardc")),
+              f"appex {appex.name}: NSExtensionMainStoryboard '{storyboard}' is compiled in it (ITMS-90357)")
+    if script := extension.get("NSExtensionAttributes", {}).get("NSExtensionJavaScriptPreprocessingFile"):
+        check((appex / f"{script}.js").is_file(),
+              f"appex {appex.name}: NSExtensionJavaScriptPreprocessingFile {script}.js at its root (ITMS-90362)")
+    aexe = appex / ainfo.get("CFBundleExecutable", "")
+    check_app_intents(check, appex, aexe)
+    aprov = appex / "embedded.mobileprovision"
+    if not check(aprov.exists(), f"appex {appex.name}: embedded.mobileprovision present"):
+        return
+    aprov_pl = profile_payload(aprov.read_bytes())
+    ateam = (aprov_pl.get("TeamIdentifier") or [""])[0]
+    agranted = aprov_pl["Entitlements"]
+    aapp_id = agranted.get("application-identifier", "")
+    check("ProvisionedDevices" not in aprov_pl and not aprov_pl.get("ProvisionsAllDevices"),
+          f"appex {appex.name}: App Store profile")
+    check(aapp_id in (f"{ateam}.{ainfo.get('CFBundleIdentifier')}", f"{ateam}.*"),
+          f"appex {appex.name}: profile app id {aapp_id} covers {ainfo.get('CFBundleIdentifier')}")
+    verify = subprocess.run([rcodesign, "verify", str(aexe)], capture_output=True, text=True, check=False)
+    check(verify.returncode == 0,
+          f"appex {appex.name}: rcodesign verify {aexe.name}"
+          f"{'' if verify.returncode == 0 else ': ' + verify.stderr.strip()[-200:]}")
+    acd = subprocess.run([rcodesign, "extract", "code-directory", str(aexe)],
+                         capture_output=True, text=True, check=True).stdout
+    acd_team = re.search(r'team_name: Some\(\s*"([^"]*)"', acd)
+    check(bool(acd_team) and acd_team.group(1) == ateam,
+          f"appex {appex.name}: CodeDirectory team id matches profile")
+    aslots = dict(re.findall(r"(Info|Resources) \(\d\): ([0-9a-f]{64})", acd))
+    aseal = appex / "_CodeSignature" / "CodeResources"
+    check(aslots.get("Info") == hashlib.sha256((appex / "Info.plist").read_bytes()).hexdigest(),
+          f"appex {appex.name}: Info.plist matches its sealed hash")
+    check(aseal.exists() and aslots.get("Resources") == hashlib.sha256(aseal.read_bytes()).hexdigest(),
+          f"appex {appex.name}: _CodeSignature/CodeResources matches its sealed hash")
+    afiles2 = plistlib.loads(aseal.read_bytes()).get("files2", {}) if aseal.exists() else {}
+    achanged = [p for p, v in afiles2.items() if not (isinstance(v, dict) and v.get("optional")) and (
+        not (appex / p).is_file()
+        or (v["hash2"] if isinstance(v, dict) else v) != hashlib.sha256((appex / p).read_bytes()).digest())]
+    aunsealed = [str(p.relative_to(appex)) for p in appex.rglob("*") if p.is_file()
+                 and str(p.relative_to(appex)) not in afiles2
+                 and p not in (aexe, appex / "Info.plist", appex / "PkgInfo")
+                 and p.relative_to(appex).parts[0] != "_CodeSignature"]
+    check(not achanged and not aunsealed, f"appex {appex.name}: every file is sealed"
+          f"{f'; changed {achanged}' if achanged else ''}"
+          f"{f'; unsealed {aunsealed}' if aunsealed else ''}")
+    axml = signature_blob(rcodesign, aexe, b"\xfa\xde\x71\x71")
+    asent_ent = plistlib.loads(axml) if axml else {}
+    check(asent_ent.get("application-identifier") == aapp_id
+          and asent_ent.get("com.apple.developer.team-identifier") == ateam,
+          f"appex {appex.name}: signed entitlements match its profile")
+    check(asent_ent.get("get-task-allow") is False, f"appex {appex.name}: signed get-task-allow is false")
+    aextra = set(asent_ent) - set(agranted)
+    check(not aextra,
+          f"appex {appex.name}: signed entitlements are a subset of its profile"
+          f"{': extra ' + str(aextra) if aextra else ''}")
+    acms = subprocess.run([rcodesign, "extract", "cms-pem", str(aexe)],
+                          capture_output=True, check=True).stdout
+    asigners = {c.public_bytes(serialization.Encoding.DER) for c in pkcs7.load_pem_pkcs7_certificates(acms)}
+    check(bool(asigners & set(aprov_pl.get("DeveloperCertificates", []))),
+          f"appex {appex.name}: signing certificate is one of the profile's DeveloperCertificates")
+
+
+def _check_appexes(check, app, info, rcodesign):
+    for appex in sorted(app.glob("PlugIns/*.appex")):
+        _check_appex(check, app, info, appex, rcodesign)
+
+
 def validate(ipa):
     """Check an .ipa offline against what App Store Connect rejects at upload. Exit 1 on any FAIL."""
     results = []
@@ -591,220 +838,18 @@ def validate(ipa):
     with zipfile.ZipFile(ipa) as z, tempfile.TemporaryDirectory() as tmp:
         names = z.namelist()
         apps = sorted({n.split("/")[1] for n in names if n.count("/") >= 2 and n.split("/")[1].endswith(".app")})
-        check(all(n.startswith("Payload/") for n in names), "every entry is under Payload/")
-        check(not any("__MACOSX" in n or n.endswith(".DS_Store") for n in names), "no __MACOSX or .DS_Store")
-        if not check(len(apps) == 1, f"exactly one app bundle in Payload/: {apps}"):
-            sys.exit(1)
+        _check_bundle_layout(check, names, apps)
         z.extractall(tmp)
         app = Path(tmp) / "Payload" / apps[0]
-        nested = sorted(p.parent.name for p in app.glob("PlugIns/*.appex/Frameworks"))
-        check(not nested, f"app extensions carry no Frameworks/ (ITMS-90206){': ' + ', '.join(nested) if nested else ''}")
-        loose = sorted(p.name for p in app.glob("Frameworks/*.dylib"))
-        check(not loose, f"no loose dylibs in Frameworks/ (ITMS-90426){': ' + ', '.join(loose) if loose else ''}")
-        for framework in sorted(app.glob("Frameworks/*.framework")):
-            with (framework / "Info.plist").open("rb") as f:
-                finfo = plistlib.load(f)
-            fexe = framework / finfo.get("CFBundleExecutable", "")
-            fverify = subprocess.run([rcodesign, "verify", str(fexe)], capture_output=True, text=True, check=False)
-            check(finfo.get("CFBundlePackageType") == "FMWK" and fexe.is_file() and fverify.returncode == 0,
-                  f"framework {framework.name}: FMWK Info.plist, signed executable")
-
+        _check_bundle_contents(check, app, rcodesign)
         with (app / "Info.plist").open("rb") as f:
             info = plistlib.load(f)
-        missing = [k for k in REQUIRED_INFO_KEYS if k not in info]
-        check(not missing, f"Info.plist has the required keys{': missing ' + ', '.join(missing) if missing else ''}")
-        unresolved = []
-        for ipath in sorted(app.rglob("Info.plist")):
-            with ipath.open("rb") as f:
-                for where in placeholder_hits(plistlib.load(f)):
-                    unresolved.append(f"{ipath.relative_to(app)}:{where or '/'}")
-        check(not unresolved,
-              "Info.plists have no unresolved $(...) placeholders"
-              f"{': ' + '; '.join(unresolved) if unresolved else ''}")
-        number = re.compile(r"^\d+(\.\d+){0,2}$")
-        short, build = info.get("CFBundleShortVersionString", ""), info.get("CFBundleVersion", "")
-        check(bool(number.match(short)), f"CFBundleShortVersionString '{short}' is up to three integers")
-        check(bool(number.match(build)), f"CFBundleVersion '{build}' is up to three integers")
-        check(info.get("CFBundlePackageType") == "APPL", "CFBundlePackageType is APPL")
-        check(info.get("CFBundleSupportedPlatforms") == ["iPhoneOS"], "CFBundleSupportedPlatforms is [iPhoneOS]")
-        check(info.get("DTPlatformName") == "iphoneos" and str(info.get("DTSDKName", "")).startswith("iphoneos"),
-              f"built against the device SDK: {info.get('DTSDKName')}")
-        check(str(info.get("DTXcode", "")).isdigit(), f"DTXcode {info.get('DTXcode')} / {info.get('DTXcodeBuild')}")
-        check("UILaunchScreen" in info or "UILaunchStoryboardName" in info, "launch screen declared")
-        # App Store processing checks UIMainStoryboardFile (90029, Mastodon). NetNewsWire build ad8849b0 was
-        # VALID with UILaunchStoryboardName and its scene manifest naming storyboards that were missing.
-        for name in sorted({v for k, v in info.items() if k.split("~")[0] == "UIMainStoryboardFile"}):
-            found = [p for p in app.glob(f"**/{name}*.storyboardc")
-                     if p.name in (f"{name}.storyboardc", f"{name}~iphone.storyboardc", f"{name}~ipad.storyboardc")]
-            check(bool(found), f"UIMainStoryboardFile '{name}' is compiled in the bundle (ITMS-90029)")
-        families = info.get("UIDeviceFamily", [])
-        check(bool(families) and set(families) <= {1, 2}, f"UIDeviceFamily {families} has only iPhone/iPad (ITMS-90100)")
-        ipad = 2 in families
-        if ipad and not info.get("UIRequiresFullScreen"):
-            check(IPAD_ORIENTATIONS <= set(info.get("UISupportedInterfaceOrientations~ipad", [])),
-                  "iPad multitasking: all four iPad orientations declared")
-
+        ipad = _check_info_plist(check, app, info)
         exe = app / info.get("CFBundleExecutable", "")
-        header = macho(exe) if exe.is_file() else None
-        if check(header is not None, f"executable {exe.name} is a thin 64-bit Mach-O"):
-            cputype, filetype, mh_flags, minos, sdk, signed = header
-            check(cputype == 0x0100000C and filetype == 2, "arm64 MH_EXECUTE")
-            check(bool(mh_flags & 0x200000), "position independent (MH_PIE)")
-            plist_min = version_tuple(info.get("MinimumOSVersion", "0"))
-            check(minos is not None and minos <= plist_min,
-                  f"LC_BUILD_VERSION iOS minos {minos} <= MinimumOSVersion {info.get('MinimumOSVersion')}")
-            check(sdk is not None and sdk >= (26, 0, 0), f"LC_BUILD_VERSION sdk {sdk} is iOS 26 or later (ITMS-90725)")
-            check(signed, "LC_CODE_SIGNATURE present")
-        check_app_intents(check, app, exe)
-
-        car = app / "Assets.car"
-        sizes = {(w, h) for w, h, _ in car_renditions(car)} if car.exists() else set()
-        check(car.exists(), f"Assets.car present ({len(sizes)} rendition sizes)")
-        # actool 27.0 stores only the 1024 icon for a single-size AppIcon (the form App Store
-        # processing accepted, FINDINGS.md 35); a multi-size set must then be complete.
-        needed = {(1024, 1024): "App Store 1024"}
-        if sizes & {(120, 120), (180, 180), (152, 152), (167, 167)}:
-            needed[(120, 120)] = "iPhone 60@2x"
-            if ipad:
-                needed.update({(152, 152): "iPad 76@2x", (167, 167): "iPad Pro 83.5@2x"})
-        for size, label in needed.items():
-            check(size in sizes, f"Assets.car has the {label} icon ({size[0]}x{size[1]})")
-        primary = info.get("CFBundleIcons", {}).get("CFBundlePrimaryIcon", {})
-        check(bool(primary.get("CFBundleIconName")), "CFBundleIcons names the primary icon (CFBundleIconName)")
-        marketing = app / f"{primary.get('CFBundleIconName', 'AppIcon')}1024x1024.png"
-        if marketing.exists():
-            check(not png_info(marketing)[2], "App Store icon has no alpha channel")
-
-        for stem in primary.get("CFBundleIconFiles", []):
-            check(any(app.glob(f"{stem}*.png")), f"declared icon file {stem}*.png is in the bundle")
-
-        prov_path = app / "embedded.mobileprovision"
-        if check(prov_path.exists(), "embedded.mobileprovision present"):
-            prov = profile_payload(prov_path.read_bytes())
-            team = (prov.get("TeamIdentifier") or [""])[0]
-            granted = prov.get("Entitlements", {})
-            app_id = granted.get("application-identifier", "")
-            check(app_id in (f"{team}.{info.get('CFBundleIdentifier')}", f"{team}.*"),
-                  f"profile app id {app_id} covers {info.get('CFBundleIdentifier')}")
-            check("ProvisionedDevices" not in prov and not prov.get("ProvisionsAllDevices"),
-                  "App Store profile (no device list, not enterprise)")
-            check(granted.get("get-task-allow") is False, "profile get-task-allow is false")
-            expires = prov["ExpirationDate"].replace(tzinfo=datetime.timezone.utc)
-            check(expires > datetime.datetime.now(datetime.timezone.utc), f"profile valid until {expires:%Y-%m-%d}")
-            test = prov.get("TeamName") == "omarchy-apple-dev TEST"
-            if test:
-                print("note TEST identity: structure only; Apple rejects this signature")
-
-            verify = subprocess.run([rcodesign, "verify", str(exe)], capture_output=True, text=True, check=False)
-            check(verify.returncode == 0,
-                  f"rcodesign verify {exe.name}{'' if verify.returncode == 0 else ': ' + verify.stderr.strip()[-200:]}")
-            cd = subprocess.run([rcodesign, "extract", "code-directory", str(exe)],
-                                capture_output=True, text=True, check=True).stdout
-            cd_team = re.search(r'team_name: Some\(\s*"([^"]*)"', cd)
-            check(bool(cd_team) and cd_team.group(1) == team,
-                  f"CodeDirectory team id {cd_team.group(1) if cd_team else None} matches the profile")
-            slots = dict(re.findall(r"(Info|Resources) \(\d\): ([0-9a-f]{64})", cd))
-            seal = app / "_CodeSignature" / "CodeResources"
-            check(slots.get("Info") == hashlib.sha256((app / "Info.plist").read_bytes()).hexdigest(),
-                  "Info.plist matches its sealed hash")
-            check(seal.exists() and slots.get("Resources") == hashlib.sha256(seal.read_bytes()).hexdigest(),
-                  "_CodeSignature/CodeResources matches its sealed hash")
-            files2 = plistlib.loads(seal.read_bytes()).get("files2", {}) if seal.exists() else {}
-            changed = [p for p, v in files2.items() if not (isinstance(v, dict) and v.get("optional")) and (
-                not (app / p).is_file()
-                or (v["hash2"] if isinstance(v, dict) else v) != hashlib.sha256((app / p).read_bytes()).digest())]
-            unsealed = [str(p.relative_to(app)) for p in app.rglob("*") if p.is_file()
-                        and str(p.relative_to(app)) not in files2
-                        and p not in (exe, app / "Info.plist", app / "PkgInfo")
-                        and p.relative_to(app).parts[0] != "_CodeSignature"]
-            check(not changed and not unsealed, "every bundle file is sealed with a matching hash"
-                  f"{f'; changed {changed}' if changed else ''}{f'; unsealed {unsealed}' if unsealed else ''}")
-            xml = signature_blob(rcodesign, exe, b"\xfa\xde\x71\x71")
-            signed_ent = plistlib.loads(xml) if xml else {}
-            check(signed_ent.get("application-identifier") == app_id
-                  and signed_ent.get("com.apple.developer.team-identifier") == team,
-                  f"signed entitlements match the profile: {signed_ent.get('application-identifier')}")
-            check(signed_ent.get("get-task-allow") is False, "signed get-task-allow is false")
-            extra = set(signed_ent) - set(granted)
-            check(not extra,
-                  f"signed entitlements are a subset of the profile{': extra ' + str(extra) if extra else ''}")
-            cms = subprocess.run([rcodesign, "extract", "cms-pem", str(exe)], capture_output=True, check=True).stdout
-            signers = {c.public_bytes(serialization.Encoding.DER) for c in pkcs7.load_pem_pkcs7_certificates(cms)}
-            check(bool(signers & set(prov.get("DeveloperCertificates", []))),
-                  "signing certificate is one of the profile's DeveloperCertificates")
-
-        for appex in sorted(app.glob("PlugIns/*.appex")):
-            with (appex / "Info.plist").open("rb") as f:
-                ainfo = plistlib.load(f)
-            check(ainfo.get("DTPlatformName") == "iphoneos" and ainfo.get("DTXcode") == info.get("DTXcode"),
-                  f"appex {appex.name}: build-environment keys (ITMS-90507)")
-            check(ainfo.get("CFBundleVersion") == info.get("CFBundleVersion")
-                  and ainfo.get("CFBundleShortVersionString") == info.get("CFBundleShortVersionString"),
-                  f"appex {appex.name}: versions match the app (ITMS-90473)")
-            check("arm64" in ainfo.get("UIRequiredDeviceCapabilities", []),
-                  f"appex {appex.name}: UIRequiredDeviceCapabilities has arm64 (ITMS-90502)")
-            extension = ainfo.get("NSExtension", {})
-            if storyboard := extension.get("NSExtensionMainStoryboard"):
-                check(any(appex.glob(f"**/{storyboard}.storyboardc")),
-                      f"appex {appex.name}: NSExtensionMainStoryboard '{storyboard}' is compiled in it (ITMS-90357)")
-            if script := extension.get("NSExtensionAttributes", {}).get("NSExtensionJavaScriptPreprocessingFile"):
-                check((appex / f"{script}.js").is_file(),
-                      f"appex {appex.name}: NSExtensionJavaScriptPreprocessingFile {script}.js at its root (ITMS-90362)")
-            aexe = appex / ainfo.get("CFBundleExecutable", "")
-            check_app_intents(check, appex, aexe)
-            aprov = appex / "embedded.mobileprovision"
-            if check(aprov.exists(), f"appex {appex.name}: embedded.mobileprovision present"):
-                aprov_pl = profile_payload(aprov.read_bytes())
-                ateam = (aprov_pl.get("TeamIdentifier") or [""])[0]
-                agranted = aprov_pl["Entitlements"]
-                aapp_id = agranted.get("application-identifier", "")
-                check("ProvisionedDevices" not in aprov_pl and not aprov_pl.get("ProvisionsAllDevices"),
-                      f"appex {appex.name}: App Store profile")
-                check(aapp_id in (f"{ateam}.{ainfo.get('CFBundleIdentifier')}", f"{ateam}.*"),
-                      f"appex {appex.name}: profile app id {aapp_id} covers {ainfo.get('CFBundleIdentifier')}")
-            else:
-                continue
-            verify = subprocess.run([rcodesign, "verify", str(aexe)], capture_output=True, text=True, check=False)
-            check(verify.returncode == 0,
-                  f"appex {appex.name}: rcodesign verify {aexe.name}"
-                  f"{'' if verify.returncode == 0 else ': ' + verify.stderr.strip()[-200:]}")
-            acd = subprocess.run([rcodesign, "extract", "code-directory", str(aexe)],
-                                 capture_output=True, text=True, check=True).stdout
-            acd_team = re.search(r'team_name: Some\(\s*"([^"]*)"', acd)
-            check(bool(acd_team) and acd_team.group(1) == ateam,
-                  f"appex {appex.name}: CodeDirectory team id matches profile")
-            aslots = dict(re.findall(r"(Info|Resources) \(\d\): ([0-9a-f]{64})", acd))
-            aseal = appex / "_CodeSignature" / "CodeResources"
-            check(aslots.get("Info") == hashlib.sha256((appex / "Info.plist").read_bytes()).hexdigest(),
-                  f"appex {appex.name}: Info.plist matches its sealed hash")
-            check(aseal.exists() and aslots.get("Resources") == hashlib.sha256(aseal.read_bytes()).hexdigest(),
-                  f"appex {appex.name}: _CodeSignature/CodeResources matches its sealed hash")
-            afiles2 = plistlib.loads(aseal.read_bytes()).get("files2", {}) if aseal.exists() else {}
-            achanged = [p for p, v in afiles2.items() if not (isinstance(v, dict) and v.get("optional")) and (
-                not (appex / p).is_file()
-                or (v["hash2"] if isinstance(v, dict) else v) != hashlib.sha256((appex / p).read_bytes()).digest())]
-            aunsealed = [str(p.relative_to(appex)) for p in appex.rglob("*") if p.is_file()
-                         and str(p.relative_to(appex)) not in afiles2
-                         and p not in (aexe, appex / "Info.plist", appex / "PkgInfo")
-                         and p.relative_to(appex).parts[0] != "_CodeSignature"]
-            check(not achanged and not aunsealed, f"appex {appex.name}: every file is sealed"
-                  f"{f'; changed {achanged}' if achanged else ''}"
-                  f"{f'; unsealed {aunsealed}' if aunsealed else ''}")
-            axml = signature_blob(rcodesign, aexe, b"\xfa\xde\x71\x71")
-            asent_ent = plistlib.loads(axml) if axml else {}
-            check(asent_ent.get("application-identifier") == aapp_id
-                  and asent_ent.get("com.apple.developer.team-identifier") == ateam,
-                  f"appex {appex.name}: signed entitlements match its profile")
-            check(asent_ent.get("get-task-allow") is False, f"appex {appex.name}: signed get-task-allow is false")
-            aextra = set(asent_ent) - set(agranted)
-            check(not aextra,
-                  f"appex {appex.name}: signed entitlements are a subset of its profile"
-                  f"{': extra ' + str(aextra) if aextra else ''}")
-            acms = subprocess.run([rcodesign, "extract", "cms-pem", str(aexe)],
-                                  capture_output=True, check=True).stdout
-            asigners = {c.public_bytes(serialization.Encoding.DER) for c in pkcs7.load_pem_pkcs7_certificates(acms)}
-            check(bool(asigners & set(aprov_pl.get("DeveloperCertificates", []))),
-                  f"appex {appex.name}: signing certificate is one of the profile's DeveloperCertificates")
+        _check_executable(check, app, info, exe)
+        _check_assets(check, app, info, ipad)
+        _check_profile(check, app, info, exe, rcodesign)
+        _check_appexes(check, app, info, rcodesign)
 
     failed = results.count(False)
     print(f"{len(results) - failed}/{len(results)} checks passed")
