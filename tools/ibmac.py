@@ -1874,8 +1874,8 @@ def _find_parent(root, ident):
     return None
 
 
-def compile_xib(path):
-    """Compile one macOS xib to NIBArchive bytes. Raises XibError."""
+def _xib_parse(path):
+    """Parse and validate a macOS xib; returns (doc, objects, where)."""
     tree = ET.parse(path)
     doc = tree.getroot()
     if doc.get("targetRuntime") != "MacOSX.Cocoa":
@@ -1883,7 +1883,435 @@ def compile_xib(path):
     objects = doc.find("objects")
     if objects is None:
         raise I.XibError(f"{path}: no <objects> element")
-    where = os.path.basename(path)
+    return doc, objects, os.path.basename(path)
+
+
+def _xib_resources(b, res):
+    for img in res.findall("image"):
+        b.image_decls[img.get("name")] = img
+    for nc in res.findall("namedColor"):
+        b.named_color_els[nc.get("name")] = nc.find("color")
+
+
+def _xib_owner(b, objects, path, where):
+    owner_el = next((e for e in objects if e.get("id") == "-2"), None)
+    if owner_el is None:
+        raise I.XibError(f"{path}: no File's Owner (id=-2)")
+    if not owner_el.get("customClass"):
+        raise I.XibError(f"{path}: File's Owner without customClass ({where})")
+    return _custom_object(b, owner_el, I._swift_class(owner_el), where)
+
+
+def _xib_visible_windows(b, objects, where, id_map, owner, vis):
+    """Windows without visibleAtLaunch="NO" are built up front, before the
+    connections array (probe About: set -> window template with the full
+    content tree inlined -> trailing window keys -> connections last).
+    Returns (keys, vis_ids)."""
+    keys = []
+    vis_ids = set()
+    for w_el in objects:
+        if w_el.tag == "window" and w_el.get("visibleAtLaunch") != "NO":
+            o = b.new("NSWindowTemplate")
+            vis.add("UINibEncoderEmptyKey", *b.ref(o))
+            _wobj, wkeys = _window(b, w_el, where, id_map, parent=owner, obj=o)
+            keys.extend(wkeys)
+            vis_ids.add(w_el.get("id"))
+    return keys, vis_ids
+
+
+def _xib_stackview_connector(b, objects, where, id_map, conns_arr, conn_objs,
+                             late_pending):
+    """A stackView with arranged subviews emits an early-decode NSNibConnector
+    as the FIRST connection; its source (the stack view, with its whole
+    subtree) allocates right after the connector, before everything else
+    (probe ShareViewController [10]/[11])."""
+    sv_el = next((e for e in objects.iter("stackView")
+                  if (s := e.find("subviews")) is not None and len(s)), None)
+    if sv_el is None:
+        return
+    early = b.new("NSNibConnector")
+    sup = _Late()
+    sv = _build_element(b, sv_el, where, superview=sup, id_map=id_map,
+                        guides={}, parent=sup)[0]
+    early.add("NSSource", *b.ref(sv))
+    early.add("NSLabel", *b.ref(b.string(
+        "Encoding NSStackView requires being decoded before other "
+        "connections with an early decoding order priority of 999990.")))
+    conns_arr.add("UINibEncoderEmptyKey", *b.ref(early))
+    conn_objs.append(early)
+    late_pending.append((sup, _find_parent(objects, sv_el.get("id")).get("id")))
+
+
+def _xib_lazy_destination(b, objects, owner, where, id_map, late_pending,
+                          late_menus, el, dest_id):
+    """Build a connection destination before the tree walk reaches it, in the
+    order Apple's ibtool allocates (probe MainMenu [8], TimelineContainerView
+    [17], NothingInspector)."""
+    if el.tag == "menu":
+        _xib_menu(b, el, id_map, where)
+    elif el.tag == "menuItem":
+        parent_el = _menu_parent_el(objects, dest_id)
+        if parent_el is None:
+            raise I.XibError(f"menu item {dest_id!r} has no parent menu ({where})")
+        late = _Late()
+        _xib_menu_item(b, el, late, id_map, where)
+        late_menus.append((late, parent_el.get("id")))
+    elif el.tag == "customObject":
+        # probe MainMenu [8]: customObject with customModule -> swapper
+        id_map[dest_id] = _xib_swapper(b, el, where)
+    elif el.tag == "constraint":
+        # probe TimelineContainerView [17]: the constraint is allocated
+        # at connection time; its not-yet-built items build RIGHT HERE
+        # (golden box [18] + closure directly after constraint [17],
+        # before the connector's label string [36])
+        lates = []
+        id_map[dest_id] = _constraint(b, el, owner, "-2", id_map, {},
+                                      {}, where, lates=lates)
+        for late, item_id in lates:
+            item_el = _find_id(objects, item_id)
+            if item_el is None or item_el.get("id") in id_map:
+                continue
+            parent_el = _find_parent(objects, item_id)
+            sup = _Late()
+            _build_element(b, item_el, where, superview=sup,
+                           id_map=id_map, guides={}, parent=sup)
+            late_pending.append((sup, parent_el.get("id")))
+            late.obj = id_map[item_id]
+    elif el.tag in ("window", "view", "customView", "textField",
+                    "secureTextField", "gridView",
+                    "button", "popUpButton", "imageView", "box",
+                    "scrollView", "textView", "tableView",
+                    "outlineView", "tableCellView", "progressIndicator"):
+        parent_el = _find_parent(objects, dest_id)
+        if parent_el is not None and parent_el.tag == "gridCell":
+            # a gridCell content's superview is the gridView
+            parent_el = next((gv for gv in objects.iter("gridView")
+                              if any(gc.get("id") == parent_el.get("id")
+                                     for gc in gv.findall("gridCells/gridCell"))),
+                             None)
+        is_cv = any(w.find("view[@key='contentView']") is not None
+                    and w.find("view[@key='contentView']").get("id") == dest_id
+                    for w in objects.findall("window"))
+        if parent_el is not None:
+            # A subview built by an outlet before its superview: Apple keeps
+            # the superview as a forward reference (probe NothingInspector).
+            late = _Late()
+            _build_element(b, el, where, superview=late,
+                           id_map=id_map, guides={}, parent=late)
+            late_pending.append((late, parent_el.get("id")))
+        elif is_cv:
+            _build_element(b, el, where, superview=None,
+                           id_map=id_map, guides={}, parent=owner)
+        else:
+            _build_element(b, el, where, superview=None,
+                           id_map=id_map, guides={}, parent=owner, root=True)
+    else:
+        raise I.XibError(f"connection destination {dest_id!r} not found ({where})")
+
+
+def _xib_outlet_connector(b, objects, owner, where, id_map, conn_objs,
+                          conns_arr, late_pending, late_menus, src_el, conn_el):
+    c = b.new("NSNibOutletConnector")
+    src = id_map.get(src_el.get("id"))
+    if src is None and src_el.tag == "tableCellView":
+        # a prototype cell view referenced by its own outlet before the
+        # tree walk builds it (probe SidebarView HeaderCell textField)
+        src = _build_element(b, src_el, where, superview=None,
+                             id_map=id_map, guides={}, parent=None)[0]
+    if src is None and src_el.tag == "menu":
+        src = _xib_menu(b, src_el, id_map, where)
+    if src is None:
+        raise I.XibError(f"connection source {src_el.get('id')!r} not built ({where})")
+    c.add("NSSource", *b.ref(src))
+    dest_id = conn_el.get("destination")
+    if dest_id not in id_map:
+        el = _find_id(objects, dest_id)
+        if el is None:
+            raise I.XibError(f"connection destination {dest_id!r} not found ({where})")
+        _xib_lazy_destination(b, objects, owner, where, id_map, late_pending,
+                              late_menus, el, dest_id)
+    c.add("NSDestination", *b.ref(id_map[dest_id]))
+    c.add("NSLabel", *b.ref(b.string(conn_el.get("property"))))
+    c.add("NSChildControllerCreationSelectorName", *(N.NIL, None))
+    conns_arr.add("UINibEncoderEmptyKey", *b.ref(c))
+    conn_objs.append(c)
+
+
+def _xib_action_connector(b, objects, where, id_map, conn_objs, conns_arr,
+                          late_menus, src_el, conn_el):
+    c = b.new("NSNibControlConnector")
+    src = id_map.get(src_el.get("id"))
+    if src is None:
+        parent_el = _menu_parent_el(objects, src_el.get("id"))
+        if parent_el is None:
+            raise I.XibError(f"action source {src_el.get('id')!r} not built ({where})")
+        late = _Late()
+        src = _xib_menu_item(b, src_el, late, id_map, where)
+        late_menus.append((late, parent_el.get("id")))
+    c.add("NSSource", *b.ref(src))
+    tgt = conn_el.get("target")
+    if tgt is not None and tgt != "-1":
+        if tgt not in id_map:
+            raise I.XibError(f"action target {tgt!r} not built ({where})")
+        c.add("NSDestination", *b.ref(id_map[tgt]))
+    c.add("NSLabel", *b.ref(b.string(conn_el.get("selector"))))
+    conns_arr.add("UINibEncoderEmptyKey", *b.ref(c))
+    conn_objs.append(c)
+
+
+def _xib_binding_options(b, opts, where, d):
+    for o_el in opts:
+        d.add("UINibEncoderEmptyKey", *b.ref(b.string(o_el.get("key"))))
+        # bool values archive INVERTED (probe: value="NO" -> NS.boolval
+        # TRUE); integers int_fit; strings plain
+        if o_el.tag == "bool":
+            key = ("boolval", o_el.get("value"))
+            n = b.bool_nums.get(key)
+            if n is None:
+                n = b.new("NSNumber")
+                n.add("NS.boolval",
+                      N.TRUE if o_el.get("value") != "YES" else N.FALSE, None)
+                b.bool_nums[key] = n
+            d.add("UINibEncoderEmptyKey", *b.ref(n))
+        elif o_el.tag == "integer":
+            v = int(o_el.get("value"))
+            n = b.number(N.INT8 if -128 <= v <= 127 else N.INT32, v)
+            d.add("UINibEncoderEmptyKey", *b.ref(n))
+        elif o_el.tag == "string":
+            d.add("UINibEncoderEmptyKey", *b.ref(b.string(o_el.text or "")))
+        else:
+            raise I.XibError(f"binding option <{o_el.tag}> not probed ({where})")
+
+
+def _xib_binding_connector(b, objects, owner, where, id_map, src_el, conn_el):
+    """One NSNibBindingConnector; lazily builds a destination
+    userDefaultsController with NSSharedInstance False (representsSharedInstance
+    =YES archives False, probe CrashReporter [131]); its keys pair is
+    (controller, owner). Returns (connector, key_pair_or_None)."""
+    c = b.new("NSNibBindingConnector")
+    src = id_map.get(src_el.get("id"))
+    if src is None:
+        raise I.XibError(f"binding source {src_el.get('id')!r} not built ({where})")
+    c.add("NSSource", *b.ref(src))
+    dest_id = conn_el.get("destination")
+    key_pair = None
+    if dest_id not in id_map:
+        el = _find_id(objects, dest_id)
+        if el is None or el.tag != "userDefaultsController":
+            raise I.XibError(f"binding destination {dest_id!r} not found ({where})")
+        udc = b.new("NSUserDefaultsController")
+        # representsSharedInstance=YES -> NSSharedInstance false (inverted,
+        # GP [311]/Crash [131]); bare element -> NSAppliesImmediately
+        # (attr value, corpus point false; Adv golden [155]/[170])
+        if el.get("representsSharedInstance") == "YES":
+            udc.add("NSSharedInstance", *b.boolean(False))
+        else:
+            udc.add("NSAppliesImmediately",
+                    *b.boolean(el.get("appliesImmediately") == "YES"))
+        id_map[dest_id] = udc
+        key_pair = (udc, owner)
+    c.add("NSDestination", *b.ref(id_map[dest_id]))
+    name, kp = conn_el.get("name"), conn_el.get("keyPath")
+    c.add("NSLabel", *b.ref(b.string(f"{name}: {kp}")))
+    c.add("NSBinding", *b.ref(b.string(name)))
+    c.add("NSKeyPath", *b.ref(b.string(kp)))
+    opts = conn_el.find("dictionary[@key='options']")
+    # probe GeneralPreferences golden [309] (QZ4-W8-rPi, no options el):
+    # connectors without <dictionary key="options"> drop NSOptions and
+    # allocate no dict
+    if opts is not None:
+        d = b.new("NSDictionary")
+        d.add("NSInlinedValue", *b.boolean(False))
+        c.add("NSOptions", *b.ref(d))
+        _xib_binding_options(b, opts, where, d)
+    c.add("NSNibBindingConnectorVersion", *b.int8(2))
+    return c, key_pair
+
+
+def _collect_grid_keys(b, el, obj, id_map, keys):
+    # golden AccountsReaderAPI [221]: rows doc order, columns doc
+    # order (parent = grid), then per gridCell doc order: cell ->
+    # grid, content field -> cell, field cell -> field, field's
+    # constraints -> field
+    rows, cols, cell_of = b.grid_meta.get(el.get("id"), ([], [], {}))
+    for r in rows:
+        keys.append((r, obj))
+    for c in cols:
+        keys.append((c, obj))
+    for c_el in el.findall("gridCells/gridCell"):
+        cell = cell_of.get(c_el.get("id"))
+        content_el = c_el.find("*[@key='contentView']")
+        if cell is None or content_el is None:
+            continue
+        keys.append((cell, obj))
+        fobj = id_map.get(content_el.get("id"))
+        if fobj is None:
+            continue
+        keys.append((fobj, cell))
+        fcell_el = content_el.find("*[@key='cell']")
+        ckey = content_el.get("id") + "#cell"
+        if fcell_el is not None and ckey in id_map:
+            keys.append((id_map[ckey], fobj))
+        for cid in b.cons_order.get(content_el.get("id"), []):
+            if cid in id_map:
+                keys.append((id_map[cid], fobj))
+
+
+def _collect_table_keys(b, el, obj, id_map, keys, where):
+    cols = el.find("tableColumns")
+    for col_el in (cols if cols is not None else []):
+        cobj = id_map.get(col_el.get("id"))
+        if cobj is None:
+            continue
+        keys.append((cobj, obj))
+        dc_el = col_el.find("textFieldCell[@key='dataCell']")
+        if dc_el is not None and dc_el.get("id") in id_map:
+            keys.append((id_map[dc_el.get("id")], cobj))
+        pvs = col_el.find("prototypeCellViews")
+        for pv in (pvs if pvs is not None else []):
+            pobj = id_map.get(pv.get("id"))
+            if pobj is None:
+                pobj = _build_element(b, pv, where, superview=None,
+                                      id_map=id_map, guides={},
+                                      parent=cobj)[0]
+            keys.append((pobj, cobj))
+            subs3 = pv.find("subviews")
+            if subs3 is not None:
+                for child in subs3:
+                    _collect_keys(b, child, pobj, id_map, keys, where)
+            for cid in b.cons_order.get(pv.get("id"), []):
+                if cid in id_map:
+                    keys.append((id_map[cid], pobj))
+
+
+def _collect_scroll_keys(b, el, obj, id_map, keys, where):
+    clip = el.find("clipView[@key='contentView']")
+    if clip is not None:
+        cobj = id_map.get(clip.get("id"))
+        if cobj is not None:
+            keys.append((cobj, obj))
+            subs2 = clip.find("subviews")
+            if subs2 is not None:
+                for child in subs2:
+                    _collect_keys(b, child, cobj, id_map, keys, where)
+    for k2 in ("horizontalScroller", "verticalScroller"):
+        s_el = el.find(f"scroller[@key='{k2}']")
+        if s_el is not None and s_el.get("id") in id_map:
+            keys.append((id_map[s_el.get("id")], obj))
+    subs2 = clip.find("subviews") if clip is not None else None
+    if subs2 is not None and len(subs2) == 1 \
+            and subs2[0].tag in ("tableView", "outlineView"):
+        hv = subs2[0].find("tableHeaderView[@key='headerView']")
+        if hv is not None and hv.get("id") in id_map:
+            keys.append((id_map[hv.get("id")], obj))
+
+
+def _collect_keys(b, el, parent, id_map, keys, where):
+    """NSObjectsKeys follows document pre-order (probe
+    DetailView/NothingInspector), not the lazy build order: window/contentView
+    or view, cell after its control, subviews, then the view's constraints;
+    the parent array mirrors it."""
+    obj = id_map.get(el.get("id"))
+    if obj is None:
+        return
+    keys.append((obj, parent))
+    if el.tag == "gridView":
+        _collect_grid_keys(b, el, obj, id_map, keys)
+    if el.tag in ("textField", "button"):
+        keys.append((id_map[el.get("id") + "#cell"], obj))
+    if el.tag == "popUpButton":
+        cell_el = el.find("popUpButtonCell[@key='cell']")
+        menu_el = cell_el.find("menu[@key='menu']")
+        # cell -> popup, menu -> cell, items -> menu (probe ImportOPMLSheet)
+        keys.append((id_map[el.get("id") + "#cell"], obj))
+        keys.append((id_map[menu_el.get("id")], id_map[cell_el.get("id")]))
+        for m in menu_el.find("items"):
+            keys.append((id_map[m.get("id")], id_map[menu_el.get("id")]))
+    cv = el.find("view[@key='contentView']")
+    if cv is not None:
+        _collect_keys(b, cv, obj, id_map, keys, where)
+    if el.tag in ("tableView", "outlineView"):
+        _collect_table_keys(b, el, obj, id_map, keys, where)
+    if el.tag == "scrollView":
+        _collect_scroll_keys(b, el, obj, id_map, keys, where)
+    subs = el.find("subviews")
+    if subs is not None:
+        for child in subs:
+            _collect_keys(b, child, obj, id_map, keys, where)
+    if el.tag in ("imageView",):
+        if el.get("id") + "#cell" in id_map:
+            keys.append((id_map[el.get("id") + "#cell"], obj))
+    for cid in b.cons_order.get(el.get("id"), []):
+        if cid in id_map:
+            keys.append((id_map[cid], obj))
+
+
+def _collect_menu_keys(b, el, parent, id_map, keys, where):
+    mo = id_map.get(el.get("id"))
+    if mo is None:
+        mo = _xib_menu(b, el, id_map, where)
+    keys.append((mo, parent))
+    items = el.find("items")
+    if items is not None:
+        for it in items:
+            io = id_map.get(it.get("id"))
+            if io is None:
+                io = _xib_menu_item(b, it, mo, id_map, where)
+            keys.append((io, mo))
+            sub = it.find("menu[@key='submenu']")
+            if sub is not None:
+                _collect_menu_keys(b, sub, io, id_map, keys, where)
+
+
+def _xib_app_proxy(b, objects, path, where):
+    app_el = next((e for e in objects if e.get("id") == "-3"), None)
+    if app_el is None:
+        raise I.XibError(f"{path}: no Application object (id=-3)")
+    if app_el.get("customClass") != "NSObject":
+        raise I.XibError(f"{path}: Application customClass {app_el.get('customClass')!r} "
+                         f"not probed ({where})")
+    return _custom_object(b, app_el, "NSApplication", where)
+
+
+def _xib_accessibility(b, objects, id_map, where, oid_count):
+    """<accessibility description=...> archives an NSNibAXAttributeConnector
+    outside the main connection/oid arrays (probe SidebarView [214], oid N+1).
+    Returns (access_conns, access_oids, access_vals)."""
+    access_conns = b.new("NSMutableArray")
+    access_conns.add("NSInlinedValue", *b.boolean(False))
+    ax_objs = []
+    for tvel in objects.iter():
+        ax_el = tvel.find("accessibility[@description]")
+        if ax_el is None or tvel.get("id") not in id_map:
+            continue
+        c = b.new("NSNibAXAttributeConnector")
+        axt = b.new("NSMutableString")
+        axt.add("NS.bytes", N.DATA, b"AXDescription")
+        c.add("AXDestinationArchiveKey", *b.ref(id_map[tvel.get("id")]))
+        c.add("AXAttributeTypeArchiveKey", *b.ref(axt))
+        c.add("AXAttributeValueArchiveKey",
+              *b.ref(_localizable(b, tvel.get("id"), ax_el.get("description"),
+                                  where,
+                                  suffix=".ibExternalAccessibilityDescription")))
+        ax_objs.append(c)
+        access_conns.add("UINibEncoderEmptyKey", *b.ref(c))
+    access_oids = b.new("NSArray")
+    access_oids.add("NSInlinedValue", *b.boolean(False))
+    if ax_objs:
+        access_vals = b.new("NSArray")
+        access_vals.add("NSInlinedValue", *b.boolean(False))
+        for c in ax_objs:
+            access_oids.add("UINibEncoderEmptyKey", *b.ref(c))
+            access_vals.add("UINibEncoderEmptyKey",
+                            *b.ref(b.number(*int_fit(oid_count + 1 + ax_objs.index(c)))))
+    else:
+        access_vals = access_oids
+    return access_conns, access_oids, access_vals
+
+
+def compile_xib(path):
+    """Compile one macOS xib to NIBArchive bytes. Raises XibError."""
+    doc, objects, where = _xib_parse(path)
     b = MacBuilder()
     # Oracle (reg-nnw-1818): xibs inside an .lproj directory are built by the
     # localized-variant step (project deployment target 15.0), which wraps user
@@ -1892,10 +2320,7 @@ def compile_xib(path):
     b.localize = ".lproj" in path
     res = doc.find("resources")
     if res is not None:
-        for img in res.findall("image"):
-            b.image_decls[img.get("name")] = img
-        for nc in res.findall("namedColor"):
-            b.named_color_els[nc.get("name")] = nc.find("color")
+        _xib_resources(b, res)
 
     root = b.new("NSObject")
     ibd = b.new("NSIBObjectData")
@@ -1907,51 +2332,17 @@ def compile_xib(path):
     late_pending = []  # (_Late, superview xib id) filled after connections
     late_menus = []    # (_Late, parent menu xib id) filled after the tree walk
 
-    owner_el = next((e for e in objects if e.get("id") == "-2"), None)
-    if owner_el is None:
-        raise I.XibError(f"{path}: no File's Owner (id=-2)")
-    if not owner_el.get("customClass"):
-        raise I.XibError(f"{path}: File's Owner without customClass ({where})")
-    owner = _custom_object(b, owner_el, I._swift_class(owner_el), where)
+    owner = _xib_owner(b, objects, path, where)
     id_map["-2"] = owner
 
     vis = b.new("NSMutableSet")
     vis.add("NSInlinedValue", *b.boolean(False))
-
-    # Windows without visibleAtLaunch="NO" are built up front, before the
-    # connections array (probe About: set -> window template with the full
-    # content tree inlined -> trailing window keys -> connections last).
-    keys = []
-    vis_ids = set()
-    for w_el in objects:
-        if w_el.tag == "window" and w_el.get("visibleAtLaunch") != "NO":
-            o = b.new("NSWindowTemplate")
-            vis.add("UINibEncoderEmptyKey", *b.ref(o))
-            _wobj, wkeys = _window(b, w_el, where, id_map, parent=owner, obj=o)
-            keys.extend(wkeys)
-            vis_ids.add(w_el.get("id"))
+    keys, vis_ids = _xib_visible_windows(b, objects, where, id_map, owner, vis)
 
     conns_arr = b.new("NSMutableArray")
     conns_arr.add("NSInlinedValue", *b.boolean(False))
-
-    # A stackView with arranged subviews emits an early-decode NSNibConnector
-    # as the FIRST connection; its source (the stack view, with its whole
-    # subtree) allocates right after the connector, before everything else
-    # (probe ShareViewController [10]/[11]).
-    sv_el = next((e for e in objects.iter("stackView")
-                  if (s := e.find("subviews")) is not None and len(s)), None)
-    if sv_el is not None:
-        early = b.new("NSNibConnector")
-        sup = _Late()
-        sv = _build_element(b, sv_el, where, superview=sup, id_map=id_map,
-                            guides={}, parent=sup)[0]
-        early.add("NSSource", *b.ref(sv))
-        early.add("NSLabel", *b.ref(b.string(
-            "Encoding NSStackView requires being decoded before other "
-            "connections with an early decoding order priority of 999990.")))
-        conns_arr.add("UINibEncoderEmptyKey", *b.ref(early))
-        conn_objs.append(early)
-        late_pending.append((sup, _find_parent(objects, sv_el.get("id")).get("id")))
+    _xib_stackview_connector(b, objects, where, id_map, conns_arr, conn_objs,
+                             late_pending)
 
     outlets, actions, bindings = [], [], []
     for src_el, conn_el in _conn_blocks(objects):
@@ -1969,171 +2360,21 @@ def compile_xib(path):
     for src_el, conn_el in outlets + sorted(
             actions, key=lambda p: (p[0].get("id") or "").encode()):
         if conn_el.tag == "action":
-            c = b.new("NSNibControlConnector")
-            src = id_map.get(src_el.get("id"))
-            if src is None:
-                parent_el = _menu_parent_el(objects, src_el.get("id"))
-                if parent_el is None:
-                    raise I.XibError(f"action source {src_el.get('id')!r} not built ({where})")
-                late = _Late()
-                src = _xib_menu_item(b, src_el, late, id_map, where)
-                late_menus.append((late, parent_el.get("id")))
-            c.add("NSSource", *b.ref(src))
-            tgt = conn_el.get("target")
-            if tgt is not None and tgt != "-1":
-                if tgt not in id_map:
-                    raise I.XibError(f"action target {tgt!r} not built ({where})")
-                c.add("NSDestination", *b.ref(id_map[tgt]))
-            c.add("NSLabel", *b.ref(b.string(conn_el.get("selector"))))
-            conns_arr.add("UINibEncoderEmptyKey", *b.ref(c))
-            conn_objs.append(c)
+            _xib_action_connector(b, objects, where, id_map, conn_objs,
+                                  conns_arr, late_menus, src_el, conn_el)
             continue
-        c = b.new("NSNibOutletConnector")
-        src = id_map.get(src_el.get("id"))
-        if src is None and src_el.tag == "tableCellView":
-            # a prototype cell view referenced by its own outlet before the
-            # tree walk builds it (probe SidebarView HeaderCell textField)
-            src = _build_element(b, src_el, where, superview=None,
-                                 id_map=id_map, guides={}, parent=None)[0]
-        if src is None and src_el.tag == "menu":
-            src = _xib_menu(b, src_el, id_map, where)
-        if src is None:
-            raise I.XibError(f"connection source {src_el.get('id')!r} not built ({where})")
-        c.add("NSSource", *b.ref(src))
-        dest_id = conn_el.get("destination")
-        if dest_id not in id_map:
-            el = _find_id(objects, dest_id)
-            if el is None:
-                raise I.XibError(f"connection destination {dest_id!r} not found ({where})")
-            if el.tag == "menu":
-                _xib_menu(b, el, id_map, where)
-            elif el.tag == "menuItem":
-                parent_el = _menu_parent_el(objects, dest_id)
-                if parent_el is None:
-                    raise I.XibError(f"menu item {dest_id!r} has no parent menu ({where})")
-                late = _Late()
-                _xib_menu_item(b, el, late, id_map, where)
-                late_menus.append((late, parent_el.get("id")))
-            elif el.tag == "customObject":
-                # probe MainMenu [8]: customObject with customModule -> swapper
-                id_map[dest_id] = _xib_swapper(b, el, where)
-            elif el.tag == "constraint":
-                # probe TimelineContainerView [17]: the constraint is allocated
-                # at connection time; its not-yet-built items build RIGHT HERE
-                # (golden box [18] + closure directly after constraint [17],
-                # before the connector's label string [36])
-                lates = []
-                id_map[dest_id] = _constraint(b, el, owner, "-2", id_map, {},
-                                              {}, where, lates=lates)
-                for late, item_id in lates:
-                    item_el = _find_id(objects, item_id)
-                    if item_el is None or item_el.get("id") in id_map:
-                        continue
-                    parent_el = _find_parent(objects, item_id)
-                    sup = _Late()
-                    _build_element(b, item_el, where, superview=sup,
-                                   id_map=id_map, guides={}, parent=sup)
-                    late_pending.append((sup, parent_el.get("id")))
-                    late.obj = id_map[item_id]
-            elif el.tag in ("window", "view", "customView", "textField",
-                            "secureTextField", "gridView",
-                            "button", "popUpButton", "imageView", "box",
-                            "scrollView", "textView", "tableView",
-                            "outlineView", "tableCellView", "progressIndicator"):
-                parent_el = _find_parent(objects, dest_id)
-                if parent_el is not None and parent_el.tag == "gridCell":
-                    # a gridCell content's superview is the gridView
-                    parent_el = next((gv for gv in objects.iter("gridView")
-                                      if any(gc.get("id") == parent_el.get("id")
-                                             for gc in gv.findall("gridCells/gridCell"))),
-                                     None)
-                is_cv = any(w.find("view[@key='contentView']") is not None
-                            and w.find("view[@key='contentView']").get("id") == dest_id
-                            for w in objects.findall("window"))
-                if parent_el is not None:
-                    # A subview built by an outlet before its superview: Apple keeps
-                    # the superview as a forward reference (probe NothingInspector).
-                    late = _Late()
-                    _build_element(b, el, where, superview=late,
-                                   id_map=id_map, guides={}, parent=late)
-                    late_pending.append((late, parent_el.get("id")))
-                elif is_cv:
-                    _build_element(b, el, where, superview=None,
-                                   id_map=id_map, guides={}, parent=owner)
-                else:
-                    _build_element(b, el, where, superview=None,
-                                   id_map=id_map, guides={}, parent=owner, root=True)
-            else:
-                raise I.XibError(f"connection destination {dest_id!r} not found ({where})")
-        c.add("NSDestination", *b.ref(id_map[dest_id]))
-        c.add("NSLabel", *b.ref(b.string(conn_el.get("property"))))
-        c.add("NSChildControllerCreationSelectorName", *(N.NIL, None))
-        conns_arr.add("UINibEncoderEmptyKey", *b.ref(c))
-        conn_objs.append(c)
+        _xib_outlet_connector(b, objects, owner, where, id_map, conn_objs,
+                              conns_arr, late_pending, late_menus,
+                              src_el, conn_el)
     # Bindings sort by SOURCE element id DESCENDING (probe GeneralPreferences:
     # wtY, Yrc, Ubm, UI6, Jwn, 6pw); outlets/actions keep ascending order.
-    # Destination userDefaultsController lazily builds NSUserDefaultsController
-    # with NSSharedInstance False (representsSharedInstance=YES archives False,
-    # probe CrashReporter [131]); its keys pair is (controller, owner).
     bind_key_pairs = []
     for src_el, conn_el in sorted(
             bindings, key=lambda p: (p[0].get("id") or "").encode(), reverse=True):
-        c = b.new("NSNibBindingConnector")
-        src = id_map.get(src_el.get("id"))
-        if src is None:
-            raise I.XibError(f"binding source {src_el.get('id')!r} not built ({where})")
-        c.add("NSSource", *b.ref(src))
-        dest_id = conn_el.get("destination")
-        if dest_id not in id_map:
-            el = _find_id(objects, dest_id)
-            if el is None or el.tag != "userDefaultsController":
-                raise I.XibError(f"binding destination {dest_id!r} not found ({where})")
-            udc = b.new("NSUserDefaultsController")
-            # representsSharedInstance=YES -> NSSharedInstance false (inverted,
-            # GP [311]/Crash [131]); bare element -> NSAppliesImmediately
-            # (attr value, corpus point false; Adv golden [155]/[170])
-            if el.get("representsSharedInstance") == "YES":
-                udc.add("NSSharedInstance", *b.boolean(False))
-            else:
-                udc.add("NSAppliesImmediately",
-                        *b.boolean(el.get("appliesImmediately") == "YES"))
-            id_map[dest_id] = udc
-            bind_key_pairs.append((udc, owner))
-        c.add("NSDestination", *b.ref(id_map[dest_id]))
-        name, kp = conn_el.get("name"), conn_el.get("keyPath")
-        c.add("NSLabel", *b.ref(b.string(f"{name}: {kp}")))
-        c.add("NSBinding", *b.ref(b.string(name)))
-        c.add("NSKeyPath", *b.ref(b.string(kp)))
-        opts = conn_el.find("dictionary[@key='options']")
-        # probe GeneralPreferences golden [309] (QZ4-W8-rPi, no options el):
-        # connectors without <dictionary key="options"> drop NSOptions and
-        # allocate no dict
-        if opts is not None:
-            d = b.new("NSDictionary")
-            d.add("NSInlinedValue", *b.boolean(False))
-            c.add("NSOptions", *b.ref(d))
-            for o_el in opts:
-                d.add("UINibEncoderEmptyKey", *b.ref(b.string(o_el.get("key"))))
-                # bool values archive INVERTED (probe: value="NO" -> NS.boolval
-                # TRUE); integers int_fit; strings plain
-                if o_el.tag == "bool":
-                    key = ("boolval", o_el.get("value"))
-                    n = b.bool_nums.get(key)
-                    if n is None:
-                        n = b.new("NSNumber")
-                        n.add("NS.boolval",
-                              N.TRUE if o_el.get("value") != "YES" else N.FALSE, None)
-                        b.bool_nums[key] = n
-                    d.add("UINibEncoderEmptyKey", *b.ref(n))
-                elif o_el.tag == "integer":
-                    v = int(o_el.get("value"))
-                    n = b.number(N.INT8 if -128 <= v <= 127 else N.INT32, v)
-                    d.add("UINibEncoderEmptyKey", *b.ref(n))
-                elif o_el.tag == "string":
-                    d.add("UINibEncoderEmptyKey", *b.ref(b.string(o_el.text or "")))
-                else:
-                    raise I.XibError(f"binding option <{o_el.tag}> not probed ({where})")
-        c.add("NSNibBindingConnectorVersion", *b.int8(2))
+        c, key_pair = _xib_binding_connector(b, objects, owner, where,
+                                             id_map, src_el, conn_el)
+        if key_pair:
+            bind_key_pairs.append(key_pair)
         conns_arr.add("UINibEncoderEmptyKey", *b.ref(c))
         conn_objs.append(c)
     for late, parent_id in late_pending:
@@ -2148,154 +2389,26 @@ def compile_xib(path):
             raise I.XibError(f"top-level <{el.tag} id='{el.get('id')}'> is never "
                              f"referenced; Apple's build order unknown ({where})")
 
-    # NSObjectsKeys follows document pre-order (probe DetailView/NothingInspector),
-    # not the lazy build order: window/contentView or view, cell after its control,
-    # subviews, then the view's constraints; the parent array mirrors it.
-    # Visible-at-launch windows were collected when built up front.
-
-    def collect(el, parent):
-        obj = id_map.get(el.get("id"))
-        if obj is None:
-            return
-        keys.append((obj, parent))
-        if el.tag == "gridView":
-            # golden AccountsReaderAPI [221]: rows doc order, columns doc
-            # order (parent = grid), then per gridCell doc order: cell ->
-            # grid, content field -> cell, field cell -> field, field's
-            # constraints -> field
-            rows, cols, cell_of = b.grid_meta.get(el.get("id"), ([], [], {}))
-            for r in rows:
-                keys.append((r, obj))
-            for c in cols:
-                keys.append((c, obj))
-            for c_el in el.findall("gridCells/gridCell"):
-                cell = cell_of.get(c_el.get("id"))
-                content_el = c_el.find("*[@key='contentView']")
-                if cell is None or content_el is None:
-                    continue
-                keys.append((cell, obj))
-                fobj = id_map.get(content_el.get("id"))
-                if fobj is None:
-                    continue
-                keys.append((fobj, cell))
-                fcell_el = content_el.find("*[@key='cell']")
-                ckey = content_el.get("id") + "#cell"
-                if fcell_el is not None and ckey in id_map:
-                    keys.append((id_map[ckey], fobj))
-                for cid in b.cons_order.get(content_el.get("id"), []):
-                    if cid in id_map:
-                        keys.append((id_map[cid], fobj))
-        if el.tag in ("textField", "button"):
-            keys.append((id_map[el.get("id") + "#cell"], obj))
-        if el.tag == "popUpButton":
-            cell_el = el.find("popUpButtonCell[@key='cell']")
-            menu_el = cell_el.find("menu[@key='menu']")
-            # cell -> popup, menu -> cell, items -> menu (probe ImportOPMLSheet)
-            keys.append((id_map[el.get("id") + "#cell"], obj))
-            keys.append((id_map[menu_el.get("id")], id_map[cell_el.get("id")]))
-            for m in menu_el.find("items"):
-                keys.append((id_map[m.get("id")], id_map[menu_el.get("id")]))
-        cv = el.find("view[@key='contentView']")
-        if cv is not None:
-            collect(cv, obj)
-        if el.tag in ("tableView", "outlineView"):
-            cols = el.find("tableColumns")
-            for col_el in (cols if cols is not None else []):
-                cobj = id_map.get(col_el.get("id"))
-                if cobj is None:
-                    continue
-                keys.append((cobj, obj))
-                dc_el = col_el.find("textFieldCell[@key='dataCell']")
-                if dc_el is not None and dc_el.get("id") in id_map:
-                    keys.append((id_map[dc_el.get("id")], cobj))
-                pvs = col_el.find("prototypeCellViews")
-                for pv in (pvs if pvs is not None else []):
-                    pobj = id_map.get(pv.get("id"))
-                    if pobj is None:
-                        pobj = _build_element(b, pv, where, superview=None,
-                                              id_map=id_map, guides={},
-                                              parent=cobj)[0]
-                    keys.append((pobj, cobj))
-                    subs3 = pv.find("subviews")
-                    if subs3 is not None:
-                        for child in subs3:
-                            collect(child, pobj)
-                    for cid in b.cons_order.get(pv.get("id"), []):
-                        if cid in id_map:
-                            keys.append((id_map[cid], pobj))
-        if el.tag == "scrollView":
-            clip = el.find("clipView[@key='contentView']")
-            if clip is not None:
-                cobj = id_map.get(clip.get("id"))
-                if cobj is not None:
-                    keys.append((cobj, obj))
-                    subs2 = clip.find("subviews")
-                    if subs2 is not None:
-                        for child in subs2:
-                            collect(child, cobj)
-            for k2 in ("horizontalScroller", "verticalScroller"):
-                s_el = el.find(f"scroller[@key='{k2}']")
-                if s_el is not None and s_el.get("id") in id_map:
-                    keys.append((id_map[s_el.get("id")], obj))
-            subs2 = clip.find("subviews") if clip is not None else None
-            if subs2 is not None and len(subs2) == 1 \
-                    and subs2[0].tag in ("tableView", "outlineView"):
-                hv = subs2[0].find("tableHeaderView[@key='headerView']")
-                if hv is not None and hv.get("id") in id_map:
-                    keys.append((id_map[hv.get("id")], obj))
-        subs = el.find("subviews")
-        if subs is not None:
-            for child in subs:
-                collect(child, obj)
-        if el.tag in ("imageView",):
-            if el.get("id") + "#cell" in id_map:
-                keys.append((id_map[el.get("id") + "#cell"], obj))
-        for cid in b.cons_order.get(el.get("id"), []):
-            if cid in id_map:
-                keys.append((id_map[cid], obj))
-
-    def collect_menu(el, parent):
-        mo = id_map.get(el.get("id"))
-        if mo is None:
-            mo = _xib_menu(b, el, id_map, where)
-        keys.append((mo, parent))
-        items = el.find("items")
-        if items is not None:
-            for it in items:
-                io = id_map.get(it.get("id"))
-                if io is None:
-                    io = _xib_menu_item(b, it, mo, id_map, where)
-                keys.append((io, mo))
-                sub = it.find("menu[@key='submenu']")
-                if sub is not None:
-                    collect_menu(sub, io)
-
     # NSObjectsKeys: NSApplication proxy, then the collected (obj, parent)
     # pairs. Allocation order (probe MainMenu): keys array shell first, then
     # the NSApplication proxy, then the tree-phase builds.
     keys_arr = b.new("NSArray")
     keys_arr.add("NSInlinedValue", *b.boolean(False))
-    app_el = next((e for e in objects if e.get("id") == "-3"), None)
-    if app_el is None:
-        raise I.XibError(f"{path}: no Application object (id=-3)")
-    if app_el.get("customClass") != "NSObject":
-        raise I.XibError(f"{path}: Application customClass {app_el.get('customClass')!r} "
-                         f"not probed ({where})")
-    nsapp = _custom_object(b, app_el, "NSApplication", where)
+    nsapp = _xib_app_proxy(b, objects, path, where)
     for el in objects:
         if el.get("id") in ("-1", "-2", "-3") or el.tag == "placeholder":
             continue
         if el.get("id") in vis_ids:
             continue
         if el.tag == "menu":
-            collect_menu(el, owner)
+            _collect_menu_keys(b, el, owner, id_map, keys, where)
         elif el.tag == "userDefaultsController":
             # keyed once via bind_key_pairs below (golden GP [120] / Crash [22]
             # / Adv [58]+[59]: declared top-level UDCs never key from the doc
             # walk, only from their bindings)
             pass
         else:
-            collect(el, owner)
+            _collect_keys(b, el, owner, id_map, keys, where)
     keys.extend(bind_key_pairs)  # userDefaultsControllers (probe CrashReporter [131])
     for late, menu_id in late_menus:
         late.obj = id_map[menu_id]
@@ -2327,37 +2440,8 @@ def compile_xib(path):
     for i in range(1, len(oids) + 1):
         numbers.append(b.number(*int_fit(i)))
         oids_values_arr.add("UINibEncoderEmptyKey", *b.ref(numbers[-1]))
-    access_conns = b.new("NSMutableArray")
-    access_conns.add("NSInlinedValue", *b.boolean(False))
-    # <accessibility description=...> archives an NSNibAXAttributeConnector
-    # outside the main connection/oid arrays (probe SidebarView [214], oid N+1)
-    ax_objs = []
-    for tvel in objects.iter():
-        ax_el = tvel.find("accessibility[@description]")
-        if ax_el is None or tvel.get("id") not in id_map:
-            continue
-        c = b.new("NSNibAXAttributeConnector")
-        axt = b.new("NSMutableString")
-        axt.add("NS.bytes", N.DATA, b"AXDescription")
-        c.add("AXDestinationArchiveKey", *b.ref(id_map[tvel.get("id")]))
-        c.add("AXAttributeTypeArchiveKey", *b.ref(axt))
-        c.add("AXAttributeValueArchiveKey",
-              *b.ref(_localizable(b, tvel.get("id"), ax_el.get("description"),
-                                  where,
-                                  suffix=".ibExternalAccessibilityDescription")))
-        ax_objs.append(c)
-        access_conns.add("UINibEncoderEmptyKey", *b.ref(c))
-    access_oids = b.new("NSArray")
-    access_oids.add("NSInlinedValue", *b.boolean(False))
-    if ax_objs:
-        access_vals = b.new("NSArray")
-        access_vals.add("NSInlinedValue", *b.boolean(False))
-        for c in ax_objs:
-            access_oids.add("UINibEncoderEmptyKey", *b.ref(c))
-            access_vals.add("UINibEncoderEmptyKey",
-                            *b.ref(b.number(*int_fit(len(oids) + 1 + ax_objs.index(c)))))
-    else:
-        access_vals = access_oids
+    access_conns, access_oids, access_vals = _xib_accessibility(
+        b, objects, id_map, where, len(oids))
 
     ibd.add("NSRoot", *b.ref(owner))
     ibd.add("NSVisibleWindows", *b.ref(vis))
@@ -2373,7 +2457,6 @@ def compile_xib(path):
         if late.obj is None:
             raise I.XibError(f"{path}: a forward reference was never filled")
     return _finalize(b, root)
-
 
 def _finalize(b, root):
     """Key table (__NSSetM order over first-intern order), class table, encode."""
