@@ -27,6 +27,9 @@ embedded frameworks clean.
 
 ## Status
 
+- Device run: not yet. The signed probe app is built; no iPhone has launched it.
+- After the header change for RN (variadic `NS_ENUM`), the Flutter counter and the Swift-plugin Flutter app still
+  build, and the Swift overlays rebuild, on Swift 6.4.
 - Verified on Linux for RN 0.87.1, arm64 iPhone, iOS 17.0 deployment target:
   app target compiles, links, bundles, signs (`receipts/2026-10-09-rn.md`).
 - JS runs as Hermes bytecode compiled by the version-matched Linux `hermesc`.

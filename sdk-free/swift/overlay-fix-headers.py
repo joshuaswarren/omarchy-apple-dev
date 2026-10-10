@@ -27,8 +27,8 @@ def foundation(p):
         n += k
     s = must(s, "- (void)setObject:(nullable id)value forKey:(NSString *)defaultName;", "- (void)setObject:(nullable id)value forKey:(NSString *)defaultName __attribute__((swift_name(\"set(_:forKey:)\")));")
     s = must(s, "- (void)setBool:(BOOL)value forKey:(NSString *)defaultName;", "- (void)setBool:(BOOL)value forKey:(NSString *)defaultName __attribute__((swift_name(\"set(_:forKey:)\")));")
-    s = must(s, "#define NS_ENUM(_type, _name) enum _name : _type _name; enum _name : _type", "#include <CoreFoundation/CFAvailability.h>\n#define NS_ENUM(_type, _name) CF_ENUM(_type, _name)")
-    s = must(s, "#define NS_OPTIONS(_type, _name) enum _name : _type _name; enum _name : _type", "#define NS_OPTIONS(_type, _name) CF_OPTIONS(_type, _name)")
+    s = must(s, "#define NS_ENUM(...) _NSEO_PICK(__VA_ARGS__, _NSEO_2, _NSEO_1)(__VA_ARGS__)", "#include <CoreFoundation/CFAvailability.h>\n#define NS_ENUM(_type, _name) CF_ENUM(_type, _name)")
+    s = must(s, "#define NS_OPTIONS(...) _NSEO_PICK(__VA_ARGS__, _NSEO_2, _NSEO_1)(__VA_ARGS__)", "#define NS_OPTIONS(_type, _name) CF_OPTIONS(_type, _name)")
     s = must(s, "typedef NSString *NSErrorDomain __attribute__((swift_wrapper(struct)));", "typedef NSString *NSErrorDomain __attribute__((swift_bridged_typedef));")
     s = must(s, "typedef NSString *NSErrorUserInfoKey __attribute__((swift_wrapper(struct)));", "typedef NSString *NSErrorUserInfoKey __attribute__((swift_bridged_typedef));")
     if 'swift_name("NSString.CompareOptions")' not in s:
