@@ -1292,23 +1292,14 @@ class Generator:
                     found.setdefault(m.group(1), rel)
         return found
 
-    def plan_packages(self, target, swift_rels):
-        """Returns (packages, products) SwiftPM declarations for the target."""
-        target_deps = [self.objs[i] for i in target.get("packageProductDependencies", [])
-                       if isinstance(self.objs.get(i), dict)]
-        refs = {oid: o for oid, o in self.objs.items()
-                if o.get("isa") == "XCRemoteSwiftPackageReference"}
-        local_refs = {oid: o for oid, o in self.objs.items()
-                      if o.get("isa") == "XCLocalSwiftPackageReference"}
-        revs = self.resolved_revisions()
-
-        packages, products, seen_pkg, seen_prod = [], [], {}, set()
-        decl_local, local_paths = {}, []
-
-        # Pass 1: resolve every explicit product dependency (no emission yet;
-        # the provided-module closure needs the local declarations first).
+    def _plan_explicit_products(self, target, refs, local_refs, revs, seen_prod):
+        """Pass 1: resolve every explicit product dependency (no emission yet;
+        the provided-module closure needs the local declarations first).
+        Returns (explicit, decl_local, local_paths); seen_prod gains names."""
         explicit = []   # ("remote", name, url, req) | ("local", name, rp, None)
-        for dep in target_deps:
+        decl_local, local_paths = {}, []
+        for dep in [self.objs[i] for i in target.get("packageProductDependencies", [])
+                    if isinstance(self.objs.get(i), dict)]:
             name = dep.get("productName")
             if not name or name in seen_prod:
                 continue
@@ -1331,20 +1322,15 @@ class Generator:
                 if rp not in decl_local:
                     decl_local[rp] = name
                     local_paths.append(rp)
+        return explicit, decl_local, local_paths
 
-        # Pass 2: modules already carried by declared local products.
-        provided = set()
-        provider_of = {}
-        for rp, prod_name in decl_local.items():
-            closure = self.provided_module_closure(rp, prod_name)
-            provided |= closure
-            for mod in closure:
-                provider_of.setdefault(mod, prod_name)
-
-        # Pass 3: emit. A product the declared dynamic product already carries
-        # is omitted: SwiftPM fails the whole build with "linked as a static
-        # library by X and Y" when the same static product reaches both the
-        # app executable and the dynamic library.
+    def _emit_explicit_products(self, explicit, decl_local, provided, provider_of,
+                                seen_pkg, seen_prod):
+        """Pass 3: emit. A product the declared dynamic product already carries
+        is omitted: SwiftPM fails the whole build with "linked as a static
+        library by X and Y" when the same static product reaches both the
+        app executable and the dynamic library."""
+        packages, products = [], []
         for kind, name, x, req in explicit:
             if kind == "remote":
                 if name in provided:
@@ -1374,9 +1360,13 @@ class Generator:
                     products.append((name, name))
                 else:
                     products.append((name, declared))
+        return packages, products
 
-        # SwiftPM needs transitive products that target sources import directly
-        # (Xcode resolves them through indirect dependencies; SwiftPM does not).
+    def _plan_imported_products(self, target, swift_rels, decl_local, local_paths,
+                                seen_pkg, seen_prod):
+        """Pass 4: SwiftPM needs transitive products that target sources import
+        directly (Xcode resolves them through indirect dependencies; SwiftPM
+        does not). Returns (extra_packages, extra_products)."""
         imported = set()
         for rel in swift_rels:
             p = os.path.join(self.proj_dir, rel)
@@ -1409,8 +1399,8 @@ class Generator:
                 rp = disc[mod]
                 if rp not in decl_local:
                     decl_local[rp] = mod
-                    packages.append(f'.package(name: {sw_sy(mod)}, '
-                                    f'path: {sw_sy(self.path_from_out(rp))})')
+                    extra_pkgs.append(f'.package(name: {sw_sy(mod)}, '
+                                      f'path: {sw_sy(self.path_from_out(rp))})')
                 extra_prods.append((mod, decl_local[rp]))
                 seen_prod.add(mod)
                 continue
@@ -1427,6 +1417,32 @@ class Generator:
             self.warn("declared additional packages for modules the target imports "
                       "through indirect dependencies (Xcode allows this, SwiftPM "
                       "does not): " + ", ".join(sorted({m for m, _ in extra_prods})))
+        return extra_pkgs, extra_prods
+
+    def plan_packages(self, target, swift_rels):
+        """Returns (packages, products) SwiftPM declarations for the target."""
+        refs = {oid: o for oid, o in self.objs.items()
+                if o.get("isa") == "XCRemoteSwiftPackageReference"}
+        local_refs = {oid: o for oid, o in self.objs.items()
+                      if o.get("isa") == "XCLocalSwiftPackageReference"}
+        revs = self.resolved_revisions()
+
+        packages, products, seen_pkg, seen_prod = [], [], {}, set()
+        explicit, decl_local, local_paths = self._plan_explicit_products(
+            target, refs, local_refs, revs, seen_prod)
+
+        # Pass 2: modules already carried by declared local products.
+        provided, provider_of = set(), {}
+        for rp, prod_name in decl_local.items():
+            closure = self.provided_module_closure(rp, prod_name)
+            provided |= closure
+            for mod in closure:
+                provider_of.setdefault(mod, prod_name)
+
+        packages, products = self._emit_explicit_products(
+            explicit, decl_local, provided, provider_of, seen_pkg, seen_prod)
+        extra_pkgs, extra_prods = self._plan_imported_products(
+            target, swift_rels, decl_local, local_paths, seen_pkg, seen_prod)
         return packages + extra_pkgs, products + extra_prods
 
     # -- manifest assembly --------------------------------------------------
