@@ -104,7 +104,7 @@ without a choice it uses `full`.
 | TestFlight and App Store | yes, with a paid account | TestFlight upload of Flutter apps, with a paid account (`sdk-free/ship.sh --upload`); App Store review not tried |
 | Needs | the Xcode archive from Apple (about 3 GB of it is used) | an iPhone only to run the apps; setup needs no phone (it reads a connected iPhone or Apple's public iOS update download) and uses about 7 GB of temporary disk |
 
-Details of the second mode are in [sdk-free/README.md](sdk-free/README.md).
+Details of the second mode are in [sdk-free/README.md](sdk-free/README.md). What has run on an iPhone and what only builds: [docs/TEST-MATRIX.md](docs/TEST-MATRIX.md).
 
 ## Install
 
