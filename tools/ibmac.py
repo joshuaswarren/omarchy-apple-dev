@@ -3974,32 +3974,34 @@ def _table_pairs(b, doc_el, id_map):
                 pairs.append((id_map[c3], pobj))
     return pairs
 
+def _table_header_view(b, el, o, id_map):
+    """NSTableHeaderView with its clip left as a forward reference; the
+    scroll view's header clip fills it later (o._hdr_late)."""
+    hv_el = el.find("tableHeaderView[@key='headerView']")
+    if hv_el is None:
+        return
+    late_clip = _Late()
+    hv = b.new("NSTableHeaderView")
+    hv.add("NSNextResponder", *b.ref(late_clip))
+    hv.add("NSNibTouchBar", *(N.NIL, None))
+    hv.add("NSvFlags", N.INT16, 256)
+    hr = hv_el.find("rect[@key='frame']")
+    hv.add("NSFrameSize", *b.ref(b.string(
+        "{%s, %s}" % (_fmt_g(hr.get("width")), _fmt_g(hr.get("height"))))))
+    hv.add("NSSuperview", *b.ref(late_clip))
+    hv.add("NSViewIsLayerTreeHost", *b.boolean(False))
+    hv.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
+    hv.add("IBNSSafeAreaLayoutGuide", *(N.NIL, None))
+    hv.add("IBNSLayoutMarginsGuide", *(N.NIL, None))
+    hv.add("IBNSClipsToBounds", *b.int8(0))
+    hv.add("NSTableView", *b.ref(o))
+    id_map[hv_el.get("id")] = hv
+    o._hdr_late = late_clip
+    o.add("NSHeaderView", *b.ref(hv))
 
-def _table_view(b, el, where, superview, id_map, parent=None):
-    """<tableView>/<outlineView> (+ customClass -> NSClassSwapper)."""
-    is_outline = el.tag == "outlineView"
-    o = b.new("NSClassSwapper" if el.get("customClass")
-              else ("NSOutlineView" if is_outline else "NSTableView"))
-    if el.get("customClass"):
-        o.add("NSClassName", *b.ref(b.string(I._swift_class(el))))
-        o.add("NSOriginalClassName",
-              *b.ref(b.string("NSOutlineView" if is_outline else "NSTableView")))
-    o.add("NSNextResponder", *(b.ref(superview) if superview is not None else (N.NIL, None)))
-    o.add("NSNibTouchBar", *(N.NIL, None))
-    v, vt = _vflags(el, where)
-    if v == 256 and el.find("autoresizingMask[@key='autoresizingMask']") is not None:
-        # the canvas solves the table to fill its clip (probe golden: empty
-        # autoresizingMask archives widthSizable|heightSizable)
-        v = 256 | I.RESIZE_FLAGS["widthSizable"] | I.RESIZE_FLAGS["heightSizable"]
-    o.add("NSvFlags", vt, v)
-    mask_el = el.find("autoresizingMask[@key='autoresizingMask']")
-    if mask_el is not None and len(mask_el.attrib) > 1:
-        # explicit autoresizing -> golden archives an EMPTY NSSubviews array
-        # (golden SidebarView [14]; TTT's empty mask omits the key)
-        arr0 = b.new("NSMutableArray")
-        arr0.add("NSInlinedValue", *b.boolean(False))
-        o.add("NSSubviews", *b.ref(arr0))
-    id_map[el.get("id")] = o
+
+def _table_base_keys(b, el, o, where, superview):
+    """Frame, base view keys and the NSControl flag block."""
     r = el.find("rect[@key='frame']")
     if float(r.get("x", 0)) == 0 and float(r.get("y", 0)) == 0:
         o.add("NSFrameSize", *b.ref(b.string(
@@ -4026,27 +4028,10 @@ def _table_view(b, el, where, superview, id_map, parent=None):
     o.add("NSControlLineBreakMode", *b.int8(0))
     o.add("NSControlWritingDirection", *b.int8(0))
     o.add("NSControlSendActionMask", *b.int8(0))
-    hv_el = el.find("tableHeaderView[@key='headerView']")
-    if hv_el is not None:
-        late_clip = _Late()
-        hv = b.new("NSTableHeaderView")
-        hv.add("NSNextResponder", *b.ref(late_clip))
-        hv.add("NSNibTouchBar", *(N.NIL, None))
-        hv.add("NSvFlags", N.INT16, 256)
-        hr = hv_el.find("rect[@key='frame']")
-        hv.add("NSFrameSize", *b.ref(b.string(
-            "{%s, %s}" % (_fmt_g(hr.get("width")), _fmt_g(hr.get("height"))))))
-        hv.add("NSSuperview", *b.ref(late_clip))
-        hv.add("NSViewIsLayerTreeHost", *b.boolean(False))
-        hv.add("NSViewWantsBestResolutionOpenGLSurface", *b.boolean(False))
-        hv.add("IBNSSafeAreaLayoutGuide", *(N.NIL, None))
-        hv.add("IBNSLayoutMarginsGuide", *(N.NIL, None))
-        hv.add("IBNSClipsToBounds", *b.int8(0))
-        hv.add("NSTableView", *b.ref(o))
-        id_map[hv_el.get("id")] = hv
-        o._hdr_late = late_clip
-        o.add("NSHeaderView", *b.ref(hv))
-    o.add("NSCornerView", *b.ref(_corner_view(b, where)))
+
+
+def _table_columns_and_colors(b, el, o, id_map, where):
+    """NSTableColumns, intercell spacing, background and grid colors."""
     cols_arr = b.new("NSMutableArray")
     cols_arr.add("NSInlinedValue", *b.boolean(False))
     o.add("NSTableColumns", *b.ref(cols_arr))
@@ -4068,16 +4053,11 @@ def _table_view(b, el, where, superview, id_map, parent=None):
     o.add("NSGridColor", *b.ref(b.catalog_color(
         "System", grid_el.get("name") if grid_el is not None else "gridColor",
         where)))
-    rss = el.get("rowSizeStyle")
-    rowh = _table_row_height(el, where)
-    o.add("NSRowHeight", *b.float64(rowh))
-    key = _tv_attr_key(el)
-    if key not in TABLE_TVFLAGS:
-        raise I.XibError(f"<{el.tag}> attr set "
-                         f"{sorted(k for k, _ in key)} not probed ({where})")
-    o.add("NSTvFlags", N.INT32, _i32(TABLE_TVFLAGS[key]))
-    o.add("NSDelegate", *(N.NIL, None))
-    o.add("NSDataSource", *(N.NIL, None))
+    return cols_el
+
+
+def _table_style_keys(b, el, o, where):
+    """Autosave, autoresizing, dragging, selection and table style keys."""
     if el.get("autosaveName"):
         o.add("NSAutosaveName", *b.ref(b.string(el.get("autosaveName"))))
     cas = el.get("columnAutoresizingStyle", "uniform")
@@ -4100,35 +4080,81 @@ def _table_view(b, el, where, superview, id_map, parent=None):
               *b.int8(2 if el.get("tableStyle") == "inset" else 1))
     o.add("NSTableViewDraggingDestinationStyle",
           *b.int8(1 if el.get("selectionHighlightStyle") == "sourceList" else 0))
+
+
+def _table_prototype_nibs(b, el, cols_el, rss, o, where):
+    """golden SidebarView [54]: identifier -> NSNib(embedded cell archive),
+    entries sorted by identifier; the dict key is the cell identifier, else
+    the column's (probe CurrentActivity [84]: identifier-less cell keyed
+    'activity')."""
     protos = []
     for col_el in (cols_el if cols_el is not None else []):
         pvs = col_el.find("prototypeCellViews")
         for pv in (pvs if pvs is not None else []):
-            # the dict key is the cell identifier, else the column's (probe
-            # CurrentActivity [84]: identifier-less cell keyed 'activity')
             ident = pv.get("identifier") or col_el.get("identifier")
             if ident is None:
                 raise I.XibError(f"prototypeCellView without identifier ({where})")
             protos.append((ident, pv, col_el))
-    if rss is not None or protos:
-        # golden SidebarView [54]: identifier -> NSNib(embedded cell archive),
-        # entries sorted by identifier
-        reusables = b.new("NSMutableDictionary")
-        reusables.add("NSInlinedValue", *b.boolean(False))
-        for ident, pv, col in sorted(protos, key=lambda t: t[0].encode()):
-            reusables.add("UINibEncoderEmptyKey", *b.ref(b.string(ident)))
-            nib = b.new("NSNib")
-            reusables.add("UINibEncoderEmptyKey", *b.ref(nib))
-            data = b.new("NSData")
-            nib.add("NSNibFileData", *b.ref(data))
-            nib.add("NSNibFileIsKeyed", *b.boolean(False))
-            nib.add("NSNibFileUseParentBundle", *b.boolean(False))
-            nib.add("NSNibFileImages", *(N.NIL, None))
-            nib.add("NSNibFileSounds", *(N.NIL, None))
-            data.add("NS.bytes", N.DATA,
-                     _compile_cell_nib(pv, where, b.localize,
-                                       ident=col.get("identifier")))
-        o.add("NSTableViewArchivedReusableViewsKey", *b.ref(reusables))
+    if not (rss is not None or protos):
+        return
+    reusables = b.new("NSMutableDictionary")
+    reusables.add("NSInlinedValue", *b.boolean(False))
+    for ident, pv, col in sorted(protos, key=lambda t: t[0].encode()):
+        reusables.add("UINibEncoderEmptyKey", *b.ref(b.string(ident)))
+        nib = b.new("NSNib")
+        reusables.add("UINibEncoderEmptyKey", *b.ref(nib))
+        data = b.new("NSData")
+        nib.add("NSNibFileData", *b.ref(data))
+        nib.add("NSNibFileIsKeyed", *b.boolean(False))
+        nib.add("NSNibFileUseParentBundle", *b.boolean(False))
+        nib.add("NSNibFileImages", *(N.NIL, None))
+        nib.add("NSNibFileSounds", *(N.NIL, None))
+        data.add("NS.bytes", N.DATA,
+                 _compile_cell_nib(pv, where, b.localize,
+                                   ident=col.get("identifier")))
+    o.add("NSTableViewArchivedReusableViewsKey", *b.ref(reusables))
+
+
+def _table_view(b, el, where, superview, id_map, parent=None):
+    """<tableView>/<outlineView> (+ customClass -> NSClassSwapper)."""
+    is_outline = el.tag == "outlineView"
+    o = b.new("NSClassSwapper" if el.get("customClass")
+              else ("NSOutlineView" if is_outline else "NSTableView"))
+    if el.get("customClass"):
+        o.add("NSClassName", *b.ref(b.string(I._swift_class(el))))
+        o.add("NSOriginalClassName",
+              *b.ref(b.string("NSOutlineView" if is_outline else "NSTableView")))
+    o.add("NSNextResponder", *(b.ref(superview) if superview is not None else (N.NIL, None)))
+    o.add("NSNibTouchBar", *(N.NIL, None))
+    v, vt = _vflags(el, where)
+    if v == 256 and el.find("autoresizingMask[@key='autoresizingMask']") is not None:
+        # the canvas solves the table to fill its clip (probe golden: empty
+        # autoresizingMask archives widthSizable|heightSizable)
+        v = 256 | I.RESIZE_FLAGS["widthSizable"] | I.RESIZE_FLAGS["heightSizable"]
+    o.add("NSvFlags", vt, v)
+    mask_el = el.find("autoresizingMask[@key='autoresizingMask']")
+    if mask_el is not None and len(mask_el.attrib) > 1:
+        # explicit autoresizing -> golden archives an EMPTY NSSubviews array
+        # (golden SidebarView [14]; TTT's empty mask omits the key)
+        arr0 = b.new("NSMutableArray")
+        arr0.add("NSInlinedValue", *b.boolean(False))
+        o.add("NSSubviews", *b.ref(arr0))
+    id_map[el.get("id")] = o
+    _table_base_keys(b, el, o, where, superview)
+    _table_header_view(b, el, o, id_map)
+    o.add("NSCornerView", *b.ref(_corner_view(b, where)))
+    cols_el = _table_columns_and_colors(b, el, o, id_map, where)
+    rss = el.get("rowSizeStyle")
+    o.add("NSRowHeight", *b.float64(_table_row_height(el, where)))
+    key = _tv_attr_key(el)
+    if key not in TABLE_TVFLAGS:
+        raise I.XibError(f"<{el.tag}> attr set "
+                         f"{sorted(k for k, _ in key)} not probed ({where})")
+    o.add("NSTvFlags", N.INT32, _i32(TABLE_TVFLAGS[key]))
+    o.add("NSDelegate", *(N.NIL, None))
+    o.add("NSDataSource", *(N.NIL, None))
+    _table_style_keys(b, el, o, where)
+    _table_prototype_nibs(b, el, cols_el, rss, o, where)
     if el.get("floatsGroupRows") is not None:
         # bug-compat: floatsGroupRows="NO" archives true
         o.add("NSTableViewShouldFloatGroupRows",
