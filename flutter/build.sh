@@ -32,9 +32,9 @@ missing=
 for t in llvm-strip llvm-lipo llvm-otool llvm-install-name-tool llvm-ar; do
   command -v "$t" >/dev/null || missing+=" $t"
 done
-[ -z "$missing" ] || { echo "missing:$missing (Arch package: llvm; install with: sudo pacman -S --needed llvm)" >&2; exit 1; }
+[ -z "$missing" ] || { echo "missing:$missing (package providing llvm-strip, llvm-lipo, llvm-otool, llvm-install-name-tool, llvm-ar; docs/DISTROS.md lists it per distribution)" >&2; exit 1; }
 for t in python3 zip file rsync; do
-  command -v "$t" >/dev/null || { echo "missing: $t (Arch package: ${t/python3/python})" >&2; exit 1; }
+  command -v "$t" >/dev/null || { echo "missing: $t (docs/DISTROS.md lists the package per distribution)" >&2; exit 1; }
 done
 file -b "$flutter_root/bin/cache/artifacts/engine/ios-release/gen_snapshot_arm64" 2>/dev/null | grep -q ELF ||
   { echo "Flutter's iOS gen_snapshot is not the Linux build; run $here/setup.sh" >&2; exit 1; }

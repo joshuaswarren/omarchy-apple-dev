@@ -75,7 +75,8 @@ package support ([#9](https://github.com/joshuaswarren/omarchy-apple-dev/pull/9)
 
 - An Apple Silicon or x86_64 Linux box running Omarchy (Arch-based). Both
   architectures are covered: AUR `swift-bin` ships aarch64 and x86_64, and the
-  installer builds xtool from source on either.
+  installer builds xtool from source on either. Other distributions can work:
+  see [docs/DISTROS.md](docs/DISTROS.md) (Ubuntu 24.04 tested in a container).
 - An iOS device and a USB cable.
 - An Apple ID (free) for **one download from Apple**: `Xcode.xip` from
   developer.apple.com. The download works from any OS — no Mac, no macOS

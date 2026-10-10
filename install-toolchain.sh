@@ -468,9 +468,9 @@ resolve_mode
 
 # --user-only: no sudo and no system packages. Bring your own Swift on PATH (a
 # swift.org tarball or mise; see --curses-compat) and the system tools below.
-if [ "${1:-}" = "--user-only" ]; then
-  echo "== 1-2. User-only install: using $(command -v swift || echo 'no swift on PATH')"
-  swift --version | head -n1
+# A system without pacman (any non-Arch distribution) takes the same route;
+# docs/DISTROS.md lists the packages to install by hand.
+warn_user_tools() {
   for tool in zip python3 git cc pkg-config pdftocairo heif-convert; do
     command -v "$tool" >/dev/null || echo "WARNING: $tool is missing; ask an admin for it"
   done
@@ -480,6 +480,18 @@ if [ "${1:-}" = "--user-only" ]; then
   lldb_missing=$(ldd "$(dirname "$(readlink -f "$(command -v swift)")")/../lib/liblldb.so"* 2>/dev/null |
     awk '/not found/ {print $1}' | sort -u)
   if [ -n "$lldb_missing" ]; then echo "WARNING: lldb needs $lldb_missing; ask an admin for it"; fi
+}
+
+if [ "${1:-}" = "--user-only" ]; then
+  echo "== 1-2. User-only install: using $(command -v swift || echo 'no swift on PATH')"
+  swift --version | head -n1
+  warn_user_tools
+elif ! command -v pacman >/dev/null 2>&1; then
+  echo "== 1-2. No pacman: skipping the Arch package steps (other distributions: docs/DISTROS.md)."
+  echo "Put a swift.org toolchain on PATH first, e.g.:"
+  echo "  curl -fsSL https://download.swift.org/swift-6.4.0-release/ubuntu2404/swift-6.4.0-RELEASE/swift-6.4.0-RELEASE-ubuntu24.04.tar.gz -o swift.tar.gz"
+  echo "  sudo tar -xzf swift.tar.gz -C /usr/local --strip-components=1 && hash -r"
+  warn_user_tools
 else
 echo "== 1. usbmuxd (device multiplexer; udev starts it on plug), zip, xtool build deps =="
 # zip packages the .ipa in ship.sh. base-devel, git, libimobiledevice and openssl
