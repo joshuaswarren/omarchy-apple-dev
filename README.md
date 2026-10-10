@@ -153,8 +153,9 @@ its wide twin inside `~/.local/lib/curses-narrow-compat` (nothing under
 `/usr/lib` is touched) and prints the export line. Pass an extracted
 toolchain directory to have it verify that every soname resolves:
 `./install-toolchain.sh --curses-compat /path/to/swift-6.3.3-RELEASE-ubi9-aarch64`.
-The variable has to be in the shell — mise does not apply `mise.toml`
-`[env]` to its post-extract `swift --version` check.
+The variable has to be in the shell — the export line `--curses-compat`
+prints is the only route this repo provides; mise's own `[env]` never
+reaches its post-extract `swift --version` check.
 
 This repo still installs AUR `swift-bin`, which resolves the same thing at
 package level and needs no shim.
