@@ -215,6 +215,42 @@ gate. When your phone DOES hold a tunnel with some host, `device-run.sh`
 documents the pymobiledevice3 tunneld bridge for that case, and
 `device-run.sh --rsd` can drive any tunnel endpoint you hold.
 
+## Remote and wireless iPhone work over Tailscale
+
+On iOS 27 you can install, launch, screenshot and read the log of an iPhone from any Linux host on your tailnet, with no
+cable and no Mac. The phone can be anywhere, as long as it has Wi-Fi and Tailscale on. (iOS 26 stays blocked, see above.)
+
+**One time, phone on USB (2 minutes):**
+
+```sh
+python3.14 -m venv ~/pmd3 && ~/pmd3/bin/pip install pymobiledevice3   # Python 3.13 or newer
+~/pmd3/bin/python tools/tailnet-tunnel.py pair                         # no tap on the phone
+```
+
+Copy `~/.local/share/pymobiledevice3/remote_<udid>.plist` to the same path on every host that should reach the phone.
+It holds a private key: treat it like an SSH key.
+
+**Every time:** keep Wi-Fi on (cellular only fails), keep Tailscale connected, unlock the phone once after a restart.
+Then, from any tailnet host (`tailscale status` shows the phone's `100.x` address):
+
+```sh
+./device-run.sh --over-tailnet 100.x.y.z path/to/App.ipa      # install and launch, tunnel closed on exit
+
+~/pmd3/bin/python tools/tailnet-tunnel.py 100.x.y.z --hold 600  # or open the tunnel yourself; prints "RSD <addr> <port>"
+~/pmd3/bin/pymobiledevice3 developer dvt screenshot shot.png --rsd <addr> <port>
+~/pmd3/bin/pymobiledevice3 syslog live --rsd <addr> <port>
+```
+
+| Phone state (iOS 27.0.1, measured 2026-10-10) | Works |
+|---|---|
+| Cable in, Wi-Fi on | yes |
+| Cable out, Wi-Fi on, host on a different subnet than the phone | yes, same port after a Wi-Fi toggle |
+| Screen locked | yes (screenshot shows the lock screen) |
+| Wi-Fi off, cellular only | **no**: the phone closes the RemotePairing port |
+| Tailscale off on the phone | no |
+
+Details, the failure list with fixes, and the parked phone-side app note: [docs/OVER-TAILNET.md](docs/OVER-TAILNET.md).
+
 ## Ship (App Store / TestFlight)
 
 From an xtool project directory:
