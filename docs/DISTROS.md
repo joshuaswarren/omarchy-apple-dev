@@ -79,6 +79,26 @@ are plain shell over the same tools and were verified on Arch with the same
 sysroot contents. Receipt with the quoted outputs:
 `receipts/2026-10-09-ubuntu-2404.md`.
 
+## NixOS — tested (x86_64)
+
+[nix-apple-dev](https://github.com/m9tdev/nix-apple-dev) packages this repository
+as a Nix flake. Verified on 2026-10-11 on NixOS (nixos-unstable): a SwiftUI app
+with an asset catalog and a `#Preview` macro was built, signed with an App Store
+Connect API key, installed and launched on an iPhone 12 mini (iOS 27.0).
+
+| Piece | How the flake provides it |
+|---|---|
+| Swift 6.4.0 | the swift.org Ubuntu 24.04 tarball, patched with `autoPatchelfHook` |
+| xtool, OpenAppleMacrosServer, actool | built from source at the revisions `install-toolchain.sh` pins |
+| pymobiledevice3, rcodesign, ipsw | Nix packages |
+| iOS SDK | built in the Nix sandbox from `Xcode_27.xip`, which the user adds to the Nix store once |
+| usbmuxd | NixOS module option, or `sudo nix run github:m9tdev/nix-apple-dev#usbmuxd` |
+
+The scripts run in a small FHS environment (`apple-dev`), because SwiftBuild
+calls some tools by fixed path (`/usr/bin/touch`). xtool, pymobiledevice3 and
+ipsw are on `PATH` there, not in `~/.local/bin`. `install-toolchain.sh` is not
+used: Nix builds every piece it installs.
+
 ## Fedora — untested
 
 Not tested. swift.org publishes no Fedora toolchain; the nearest builds are

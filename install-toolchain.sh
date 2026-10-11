@@ -603,7 +603,9 @@ echo "-- Route B (optional): an extracted Xcode.app tree --"
 
 echo "== 6. Darwin SDK registration =="
 toolchain_first_on_path
-if swift sdk list 2>/dev/null | grep -q darwin; then
+# Exact match: a broken bundle makes `swift sdk list` print a warning that also
+# contains "darwin" (darwin.artifactbundle).
+if swift sdk list 2>/dev/null | grep -qx darwin; then
   echo "Darwin SDK already registered; skipping install."
 elif [ -n "${XCODE_XIP:-}" ] && [ -f "$XCODE_XIP" ]; then
   sdk_build_and_install "$XCODE_XIP"

@@ -60,8 +60,14 @@ set -euo pipefail
 PATH="$(dirname "$(readlink -f "$(command -v swift)")"):$PATH"
 export PATH
 
+# install-toolchain.sh puts these in ~/.local/bin and ~/pymobile3-venv. A
+# toolchain from a package manager (for example Nix) has them on PATH instead.
 XT="$HOME/.local/bin/xtool"
+[ -x "$XT" ] || XT=$(command -v xtool || echo "$XT")
 PMD3="$HOME/pymobile3-venv/bin/pymobiledevice3"
+[ -x "$PMD3" ] || PMD3=$(command -v pymobiledevice3 || echo "$PMD3")
+IPSW="$HOME/.local/bin/ipsw"
+[ -x "$IPSW" ] || IPSW=$(command -v ipsw || echo "$IPSW")
 
 MODE=usb; UDID=; RSD_HOST=; RSD_PORT=; PKG=; LLDB=0; SUDO=0; ATTACH=0; TAILNET_HOST=
 while [ $# -gt 0 ]; do
@@ -188,10 +194,10 @@ print(d["ProductVersion"] + " (" + d["BuildVersion"] + ")")' "$info")"
     echo "Copying the shared cache from the iPhone (once per iOS build, a few GB)"
     "$PMD3" developer fetch-symbols download "$sym/dsc" "${rsd[@]}"
     dsc=$(find "$sym/dsc" -name dyld_shared_cache_arm64e | head -n1)
-    "$HOME/.local/bin/ipsw" dyld info "$dsc" --dylibs 2>/dev/null | grep -o '/[^ ]*$' |
+    "$IPSW" dyld info "$dsc" --dylibs 2>/dev/null | grep -o '/[^ ]*$' |
       grep -E '^/usr/lib/(swift/|libobjc)' | while read -r p; do
         mkdir -p "$sym/Symbols$(dirname "$p")"
-        "$HOME/.local/bin/ipsw" dyld extract "$dsc" "$(basename "$p")" --slide -o "$sym/Symbols$(dirname "$p")" >/dev/null
+        "$IPSW" dyld extract "$dsc" "$(basename "$p")" --slide -o "$sym/Symbols$(dirname "$p")" >/dev/null
       done
   fi
   # Stop the running app (needs the DDI), then install over it. --attach leaves it alone.

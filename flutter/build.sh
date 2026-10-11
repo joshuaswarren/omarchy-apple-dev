@@ -112,5 +112,7 @@ rm -f "$out/Runner.ipa"
 echo "Built $out/Runner.ipa ($BUNDLE_ID $BUILD_NAME+$BUILD_NUMBER, iOS $MIN_IOS+)"
 
 if [ -n "$install" ]; then
-  "${XTOOL:-$HOME/.local/bin/xtool}" install --usb "$out/Runner.ipa"
+  xt=${XTOOL:-$HOME/.local/bin/xtool}
+  [ -x "$xt" ] || xt=$(command -v xtool || echo "$xt") # on PATH with a packaged toolchain
+  "$xt" install --usb "$out/Runner.ipa"
 fi
