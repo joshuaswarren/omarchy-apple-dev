@@ -290,6 +290,15 @@ profile type and app id, entitlements, team id and every sealed hash. Any
 Without an App Store Connect key it signs with a local TEST identity. That
 output proves the pipeline, and Apple will reject that signature.
 
+SwiftPM keeps a target's resources in its resource bundle, where only
+`Bundle.module` finds them. `ship.sh` moves the files Apple needs at the app
+root (storyboards, nibs and the app's own `PrivacyInfo.xcprivacy`) and leaves the
+rest in the bundle. If app code reads other resources through `Bundle.main`, set
+`ROOT_RESOURCES` to the space-separated patterns to move as well, for example
+`ROOT_RESOURCES='*.lproj *.wav'` for localized strings, `InfoPlist.strings` and
+sounds. Keep the list short: copying everything into an upload once stalled App
+Store processing (`--device` builds still copy everything).
+
 For HTTPS authentication callbacks, set `ASC_ENTITLEMENTS_PATH` to the app's
 requested entitlements plist when running `ship.sh`. The signer copies its exact
 `com.apple.developer.associated-domains` values (`applinks:` and

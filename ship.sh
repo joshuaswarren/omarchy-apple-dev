@@ -71,11 +71,19 @@ for target in "$app" "$app"/PlugIns/*.appex; do
   resbundle=$(find "$target" -maxdepth 1 -type d -name "*_$name.bundle" -print -quit)
   [ -n "$resbundle" ] || continue
   js=$("$PY" -c 'import plistlib,sys; print(plistlib.load(open(sys.argv[1],"rb")).get("NSExtension",{}).get("NSExtensionAttributes",{}).get("NSExtensionJavaScriptPreprocessingFile",""))' "$target/Info.plist")
+  # The bundle's own privacy manifest belongs at its root too (ITMS-91053 reads it there).
+  # ROOT_RESOURCES (space-separated patterns, e.g. '*.lproj *.wav') opts more top-level entries
+  # in, for app code that reads Bundle.main: Localizable.strings and InfoPlist.strings in *.lproj,
+  # sounds. A narrow list, not the device path's full copy, which once stalled App Store processing.
+  extra=()
+  set -f  # the patterns are for find, not for the shell
+  for pat in ${ROOT_RESOURCES:-}; do extra+=(-o -path "./$pat"); done
+  set +f
   while IFS= read -r -d '' rel; do
     rel=${rel#./}
     mkdir -p "$target/$(dirname "$rel")"
     mv "$resbundle/$rel" "$target/$rel"
-  done < <(cd "$resbundle" && find . \( -name '*.storyboardc' -o -name '*.nib' ${js:+-o -name "$js.js"} \) -prune -print0)
+  done < <(cd "$resbundle" && find . -mindepth 1 \( -name '*.storyboardc' -o -name '*.nib' -o -path ./PrivacyInfo.xcprivacy ${js:+-o -name "$js.js"} "${extra[@]}" \) -prune -print0)
 done
 
 echo "== 3. App icon catalog =="
