@@ -474,7 +474,10 @@ def capability_entitlements(requested, granted, ident):
                 "enable PUSH_NOTIFICATIONS for the bundle ID and recreate its profile")
         signed[APS_KEY] = granted[APS_KEY]
     if SIWA_KEY in requested:
-        if "Default" not in (granted.get(SIWA_KEY) or []):
+        siwa = granted.get(SIWA_KEY)
+        if isinstance(siwa, str):  # a string grant is one value, not a substring test
+            siwa = [siwa]
+        if "Default" not in (siwa or []):
             die(f"profile for {ident} does not grant Sign in with Apple; "
                 "enable APPLE_ID_AUTH for the bundle ID and recreate its profile")
         signed[SIWA_KEY] = ["Default"]
@@ -827,7 +830,10 @@ def _check_signature_seals(check, root, exe, rcodesign, prov, team, app_id):
                   and signed_ent.get(APS_KEY) == granted.get(APS_KEY),
                   "signed aps-environment matches the profile grant")
         if SIWA_KEY in caps:
-            check(signed_ent.get(SIWA_KEY) == ["Default"] and "Default" in (granted.get(SIWA_KEY) or []),
+            siwa = granted.get(SIWA_KEY)
+            if isinstance(siwa, str):
+                siwa = [siwa]
+            check(signed_ent.get(SIWA_KEY) == ["Default"] and "Default" in (siwa or []),
                   "signed Sign in with Apple matches the app request")
     cms = subprocess.run([rcodesign, "extract", "cms-pem", str(exe)], capture_output=True, check=True).stdout
     signers = {c.public_bytes(serialization.Encoding.DER) for c in pkcs7.load_pem_pkcs7_certificates(cms)}

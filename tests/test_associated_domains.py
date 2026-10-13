@@ -156,6 +156,46 @@ class CapabilityTests(SignerTests):
         with self.assertRaisesRegex(SystemExit, r'must be \["Default"\]'):
             self.install()
 
+    def test_sign_in_with_apple_string_grant_is_compared_whole(self):
+        # "Default" must not match inside "NotDefault": a string grant is one value, not a substring test.
+        self.request_caps(**{'com.apple.developer.applesignin': ['Default']})
+        self.granted['com.apple.developer.applesignin'] = 'Default'
+        self.assertEqual(self.install()['com.apple.developer.applesignin'], ['Default'])
+        self.granted['com.apple.developer.applesignin'] = 'NotDefault'
+        with self.assertRaisesRegex(SystemExit, 'does not grant Sign in with Apple'):
+            self.install()
+
+    def test_post_sign_sign_in_with_apple_compares_the_grant_whole(self):
+        import re
+        self.signer['re'] = re
+        info = self.app / 'Info.plist'
+        info.write_bytes(plistlib.dumps({'CFBundleIdentifier': 'com.example.fake'}))
+        seal = self.app / '_CodeSignature/CodeResources'
+        seal.parent.mkdir()
+        seal.write_bytes(plistlib.dumps({'files2': {}}))
+        cd = ('team_name: Some("FAKE000000")\nInfo (1): ' + hashlib.sha256(info.read_bytes()).hexdigest()
+              + '\nResources (3): ' + hashlib.sha256(seal.read_bytes()).hexdigest())
+        self.signer['subprocess'] = SimpleNamespace(run=lambda args, **kwargs:
+            SimpleNamespace(returncode=0, stderr='', stdout=cd if 'code-directory' in args else b'FAKE-CMS'))
+        self.signer['serialization'] = SimpleNamespace(Encoding=SimpleNamespace(DER=None))
+        self.signer['pkcs7'] = SimpleNamespace(load_pem_pkcs7_certificates=lambda cms:
+            [SimpleNamespace(public_bytes=lambda encoding: b'FAKE-CERTIFICATE')])
+        self.request_caps(**{'com.apple.developer.applesignin': ['Default']})
+        key = 'com.apple.developer.applesignin'
+        for grant, matches in ((['Default'], True), ('Default', True), ('NotDefault', False),
+                               (['NotDefault'], False), ([], False), (None, False)):
+            with self.subTest(grant=grant):
+                self.granted[key] = grant
+                if grant is None:
+                    self.granted.pop(key)
+                signed = dict(self.granted, **{key: ['Default']})
+                self.signer['signature_blob'] = lambda *args, signed=signed: plistlib.dumps(signed)
+                results = {}
+                self.signer['_check_signature_seals'](lambda ok, msg: results.update({msg: bool(ok)}),
+                    self.app, self.app / 'Fake', 'fake-rcodesign', self.profile, 'FAKE000000',
+                    'FAKE000000.com.example.fake')
+                self.assertEqual(results['signed Sign in with Apple matches the app request'], matches)
+
     def test_unrequested_capabilities_are_not_signed(self):
         self.granted['aps-environment'] = 'production'
         self.granted['com.apple.developer.applesignin'] = ['Default']
