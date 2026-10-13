@@ -1,6 +1,7 @@
 """`xcstringstool generate-symbols --language swift`: one LocalizedStringResource symbol per manually
 managed key, in the shape Xcode 27's xcstringstool writes."""
 import re
+import sys
 
 SPEC = re.compile(r"%(\d+\$)?([-+ #0]*\d*(?:\.\d+)?)(hh|h|ll|l|q|z|t|j|L)?([@dDiuUxXoOfeEgGcCsSpaA])")
 
@@ -46,10 +47,23 @@ def camel(words):
     return "".join(out)
 
 
+# Swift reserved words. Apple's generator escapes a symbol that matches one with backticks
+# (key "CONTINUE" -> static var `continue`), so the generated file compiles.
+SWIFT_KEYWORDS = frozenset("""
+    associatedtype borrowing class consuming deinit enum extension fileprivate func import init
+    inout internal let nonisolated open operator private precedencegroup protocol public rethrows
+    static struct subscript typealias var break case catch continue default defer do else
+    fallthrough for guard if in repeat return throw switch where while Any as await false is nil
+    self Self super throws true try
+""".split())
+
+
 def identifier(key):
     text = SPEC.sub(" ", key).replace("'", "").replace("’", "")
     name = camel(re.findall(r"[^\W_]+", text, re.UNICODE)) or "string"
-    return "_" + name if name[0].isdigit() else name
+    if name[0].isdigit():
+        return "_" + name
+    return f"`{name}`" if name in SWIFT_KEYWORDS else name
 
 
 def swift_literal(s):
@@ -120,6 +134,18 @@ def swift_symbols(catalog, name, stem):
     source = catalog["sourceLanguage"]
     strings = catalog.get("strings", {})
     manual = [(k, strings[k]) for k in sorted(strings) if strings[k].get("extractionState") == "manual"]
+    if not manual:
+        return ""
+    # Keys that differ only in case or punctuation ("Cancel", "CANCEL") make the same symbol, and two
+    # declarations of one name do not compile. Leave out every key of such a group; the strings stay
+    # in the compiled table, only their symbols are not generated.
+    names = {}
+    for k, _ in manual:
+        names.setdefault(identifier(k), []).append(k)
+    clashes = {n: ks for n, ks in names.items() if len(ks) > 1}
+    for n, ks in sorted(clashes.items()):
+        print(f"warning: {stem}.xcstrings: no symbol '{n}' for keys {ks} (same name)", file=sys.stderr)
+    manual = [(k, e) for k, e in manual if identifier(k) not in clashes]
     if not manual:
         return ""
     body = "\n\n".join(symbol(k, e, stem, source) for k, e in manual)
