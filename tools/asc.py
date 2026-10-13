@@ -416,7 +416,10 @@ def bundles(app_dir):
 
 
 def associated_domains_allowed(requested, granted):
-    """Only concrete app-requested domains may use the profile's wildcard grant."""
+    """Only concrete app-requested domains may use the profile's wildcard grant. An App Store
+    profile grants the wildcard as the string "*" rather than a list."""
+    if isinstance(granted, str):
+        granted = [granted]
     return isinstance(requested, list) and isinstance(granted, list) and all(
         isinstance(value, str) and value.startswith(("applinks:", "webcredentials:"))
         and value.split(":", 1)[1] and "*" not in value

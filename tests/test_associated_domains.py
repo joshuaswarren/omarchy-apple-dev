@@ -64,6 +64,13 @@ class SignerTests(unittest.TestCase):
         self.assertEqual(signed['com.apple.developer.associated-domains'], self.domains)
         self.assertNotIn('*', signed['com.apple.developer.associated-domains'])
 
+    def test_an_app_store_profile_string_wildcard_grants_the_domains(self):
+        # Real IOS_APP_STORE profiles carry the wildcard as a string, not a list.
+        self.granted['com.apple.developer.associated-domains'] = '*'
+        self.assertEqual(self.install()['com.apple.developer.associated-domains'], self.domains)
+        self.assertTrue(self.signer['associated_domains_allowed'](self.domains, '*'))
+        self.assertFalse(self.signer['associated_domains_allowed'](self.domains, 'applinks:other.example.test'))
+
     def test_missing_or_mismatched_profile_grant_fails(self):
         for value in (None, [], ['applinks:other.example.test']):
             with self.subTest(grant=value):
