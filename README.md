@@ -301,6 +301,15 @@ Offline verification accepts concrete domain values against a `*` profile grant
 and rejects mismatches. Existing entitlements and builds without this option
 are unchanged. Confirm the HTTPS callback on a signed device build.
 
+The same file can request push and Sign in with Apple. With `aps-environment`
+in it, the app is signed with the environment the profile grants (an App Store
+profile grants `production`, as Xcode signs it), so a file that says
+`development` works for both device and App Store builds. With
+`com.apple.developer.applesignin` (`["Default"]`), the app is signed with it. Enable
+`PUSH_NOTIFICATIONS` or `APPLE_ID_AUTH` for the bundle ID first; signing fails if
+the profile does not grant what the file requests, and offline verification
+checks both values.
+
 To upload, once:
 
 1. Create an App Store Connect API team key (role App Manager with access to

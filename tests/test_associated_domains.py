@@ -14,12 +14,14 @@ def signer_namespace():
     # Test the signer offline without importing API/cryptography dependencies.
     source = (Path(__file__).resolve().parents[1] / "tools/asc.py").read_text()
     names = {'associated_domains_allowed', 'requested_associated_domains',
+             'requested_capabilities', 'capability_entitlements',
              'install_all_bundles', '_check_signature_seals'}
     tree = ast.parse(source)
     tree.body = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in names]
     if {node.name for node in tree.body} != names:
         raise AssertionError('signer patch must contain the complete functions under test')
-    namespace = dict(os=os, Path=Path, plistlib=plistlib, hashlib=hashlib, APP_GROUPS=[])
+    namespace = dict(os=os, Path=Path, plistlib=plistlib, hashlib=hashlib, APP_GROUPS=[],
+                     APS_KEY='aps-environment', SIWA_KEY='com.apple.developer.applesignin')
     def die(message):
         raise SystemExit(message)
     namespace['die'] = die
@@ -114,6 +116,52 @@ class SignerTests(unittest.TestCase):
                 self.assertEqual(all(results.values()), domains == self.domains)
         self.granted['com.apple.developer.associated-domains'] = ['applinks:other.example.test']
         self.assertFalse(self.signer['associated_domains_allowed'](self.domains, self.granted['com.apple.developer.associated-domains']))
+
+
+class CapabilityTests(SignerTests):
+    """Push and Sign in with Apple requested through ASC_ENTITLEMENTS_PATH."""
+
+    def request_caps(self, **caps):
+        self.request.write_bytes(plistlib.dumps({'com.apple.developer.associated-domains': self.domains, **caps}))
+
+    def test_push_takes_the_profile_environment(self):
+        self.granted['aps-environment'] = 'production'
+        self.request_caps(**{'aps-environment': 'development'})
+        self.assertEqual(self.install()['aps-environment'], 'production')
+
+    def test_push_without_a_profile_grant_fails(self):
+        self.request_caps(**{'aps-environment': 'development'})
+        with self.assertRaisesRegex(SystemExit, 'does not grant aps-environment'):
+            self.install()
+
+    def test_push_request_must_name_an_environment(self):
+        self.granted['aps-environment'] = 'production'
+        self.request_caps(**{'aps-environment': 'staging'})
+        with self.assertRaisesRegex(SystemExit, 'development or production'):
+            self.install()
+
+    def test_sign_in_with_apple_is_signed_when_granted(self):
+        self.granted['com.apple.developer.applesignin'] = ['Default']
+        self.request_caps(**{'com.apple.developer.applesignin': ['Default']})
+        self.assertEqual(self.install()['com.apple.developer.applesignin'], ['Default'])
+
+    def test_sign_in_with_apple_without_a_grant_fails(self):
+        self.request_caps(**{'com.apple.developer.applesignin': ['Default']})
+        with self.assertRaisesRegex(SystemExit, 'does not grant Sign in with Apple'):
+            self.install()
+
+    def test_sign_in_with_apple_request_must_be_default(self):
+        self.granted['com.apple.developer.applesignin'] = ['Default']
+        self.request_caps(**{'com.apple.developer.applesignin': ['Other']})
+        with self.assertRaisesRegex(SystemExit, r'must be \["Default"\]'):
+            self.install()
+
+    def test_unrequested_capabilities_are_not_signed(self):
+        self.granted['aps-environment'] = 'production'
+        self.granted['com.apple.developer.applesignin'] = ['Default']
+        signed = self.install()
+        self.assertNotIn('aps-environment', signed)
+        self.assertNotIn('com.apple.developer.applesignin', signed)
 
 
 if __name__ == '__main__':

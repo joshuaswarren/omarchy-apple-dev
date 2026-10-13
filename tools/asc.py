@@ -438,6 +438,49 @@ def requested_associated_domains():
     return values
 
 
+APS_KEY = "aps-environment"
+SIWA_KEY = "com.apple.developer.applesignin"
+
+
+def requested_capabilities():
+    """The push and Sign in with Apple entitlements the app requests in ASC_ENTITLEMENTS_PATH."""
+    path = os.environ.get("ASC_ENTITLEMENTS_PATH")
+    if not path:
+        return {}
+    with Path(path).open("rb") as f:
+        requested = plistlib.load(f)
+    if not isinstance(requested, dict):
+        die("ASC_ENTITLEMENTS_PATH must contain an entitlements dictionary")
+    caps = {}
+    if APS_KEY in requested:
+        if requested[APS_KEY] not in ("development", "production"):
+            die("requested aps-environment must be development or production")
+        caps[APS_KEY] = requested[APS_KEY]
+    if SIWA_KEY in requested:
+        if requested[SIWA_KEY] != ["Default"]:
+            die('requested com.apple.developer.applesignin must be ["Default"]')
+        caps[SIWA_KEY] = ["Default"]
+    return caps
+
+
+def capability_entitlements(requested, granted, ident):
+    """Signed values for the requested capabilities. Push takes the profile's environment, as Xcode
+    signs (an App Store profile grants production even when the app's file says development);
+    Sign in with Apple must be granted as requested. A missing grant fails closed."""
+    signed = {}
+    if APS_KEY in requested:
+        if granted.get(APS_KEY) not in ("development", "production"):
+            die(f"profile for {ident} does not grant aps-environment; "
+                "enable PUSH_NOTIFICATIONS for the bundle ID and recreate its profile")
+        signed[APS_KEY] = granted[APS_KEY]
+    if SIWA_KEY in requested:
+        if "Default" not in (granted.get(SIWA_KEY) or []):
+            die(f"profile for {ident} does not grant Sign in with Apple; "
+                "enable APPLE_ID_AUTH for the bundle ID and recreate its profile")
+        signed[SIWA_KEY] = ["Default"]
+    return signed
+
+
 def install_all_bundles(app_dir, out_dir, prov_for, key_path, cert_path):
     """For every bundle (app + each PlugIns/*.appex): embed the profile, write a per-bundle
     entitlements plist (application-identifier, team-identifier, beta-reports-active if granted,
@@ -447,6 +490,7 @@ def install_all_bundles(app_dir, out_dir, prov_for, key_path, cert_path):
     out.mkdir(parents=True, exist_ok=True)
     groups_warned = False
     requested_domains = requested_associated_domains()
+    requested_caps = requested_capabilities()
     for path, ident in bundles(app_dir):
         prov = prov_for(ident)
         (path / "embedded.mobileprovision").write_bytes(prov)
@@ -463,6 +507,8 @@ def install_all_bundles(app_dir, out_dir, prov_for, key_path, cert_path):
                 die(f"profile for {ident} does not grant the app's requested Associated Domains; "
                     "enable ASSOCIATED_DOMAINS for the bundle ID and recreate its profile")
             entitlements[domain_key] = requested_domains
+        if path == Path(app_dir) and requested_caps:
+            entitlements.update(capability_entitlements(requested_caps, granted, ident))
         granted_groups = set(granted.get("com.apple.security.application-groups", []))
         if granted_groups:
             entitlements["com.apple.security.application-groups"] = sorted(granted_groups)
@@ -775,6 +821,14 @@ def _check_signature_seals(check, root, exe, rcodesign, prov, team, app_id):
     if os.environ.get("ASC_ENTITLEMENTS_PATH"):
         check(signed_ent.get(domain_key, []) == requested_associated_domains(),
               "signed Associated Domains match the app request")
+        caps = requested_capabilities()
+        if APS_KEY in caps:
+            check(granted.get(APS_KEY) in ("development", "production")
+                  and signed_ent.get(APS_KEY) == granted.get(APS_KEY),
+                  "signed aps-environment matches the profile grant")
+        if SIWA_KEY in caps:
+            check(signed_ent.get(SIWA_KEY) == ["Default"] and "Default" in (granted.get(SIWA_KEY) or []),
+                  "signed Sign in with Apple matches the app request")
     cms = subprocess.run([rcodesign, "extract", "cms-pem", str(exe)], capture_output=True, check=True).stdout
     signers = {c.public_bytes(serialization.Encoding.DER) for c in pkcs7.load_pem_pkcs7_certificates(cms)}
     check(bool(signers & set(prov.get("DeveloperCertificates", []))),
