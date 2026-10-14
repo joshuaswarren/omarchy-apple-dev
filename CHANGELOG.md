@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Xcode version from a .xip
+
+- `install-toolchain.sh` reads `Xcode.app/Contents/version.plist` from the `.xip` stream with
+  `tools/xip_version.py` (Python standard library only) and records it next to the cached SDK, so `ship.sh`
+  stamps `DTXcode` and `DTXcodeBuild` without `XCODE_VERSION` and `XCODE_BUILD`. A missing member or a
+  malformed archive records nothing and keeps the old `XCODE_VERSION`/`XCODE_BUILD` message. Covered by
+  `tests/test_xip_version.py`, which builds a synthetic `.xip` in the test.
+
 ### Tests
 
 - `tests/run.sh` now runs every `tests/test_*.py` unittest file. Before, CI ran none of them, so

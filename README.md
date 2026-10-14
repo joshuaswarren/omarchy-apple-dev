@@ -139,6 +139,10 @@ XCODE_XIP=/path/to/Xcode.xip ./install-toolchain.sh
 
 Verify with `swift sdk list` (should print `darwin`).
 
+A `.xip` install also records the Xcode version and build, which `ship.sh` stamps as
+`DTXcode` and `DTXcodeBuild`. If the script cannot read them from the `.xip`, `ship.sh` asks for
+`XCODE_VERSION` and `XCODE_BUILD` as before.
+
 Already have a Mac with a matching Xcode? You can stream just the ~3 GB of
 SDK pieces xtool needs instead of the full .xip. Route B in
 `install-toolchain.sh` section 5 does this. It is optional; the .xip route

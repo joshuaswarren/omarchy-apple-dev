@@ -289,9 +289,17 @@ sdk_build_and_install() {
   mv "$tmpd/darwin.xtoolsdk" "$cached"
   rmdir "$tmpd"
   echo "SDK cache kept at: $cached"
-  # ship.sh stamps DTXcode/DTXcodeBuild from this. A .xip hides it; set
-  # XCODE_VERSION and XCODE_BUILD for ship.sh instead.
+  # ship.sh stamps DTXcode/DTXcodeBuild from this. An Xcode.app has the file; for a .xip,
+  # tools/xip_version.py streams it out of the archive. If that fails, set XCODE_VERSION and
+  # XCODE_BUILD for ship.sh instead.
   if [ -f "$1/Contents/version.plist" ]; then cp "$1/Contents/version.plist" "$cached.version.plist"; fi
+  if [ -f "$1" ]; then
+    if xcode_ver=$(python3 -I "$REPO_DIR/tools/xip_version.py" "$1" "$cached.version.plist"); then
+      echo "Xcode version recorded: $xcode_ver"
+    else
+      echo "could not read Xcode's version from the .xip; ship.sh will ask for XCODE_VERSION and XCODE_BUILD"
+    fi
+  fi
   # ship.sh trains App Shortcuts (Metadata.appintents/nlu) with Xcode's phrase lists from here. A
   # .xip hides them too; set SSU_RESOURCES for ship.sh to a copy of this directory instead.
   ssu_src="$1/Contents/Frameworks/SiriSSUKitModel.framework/Versions/A/Resources"
