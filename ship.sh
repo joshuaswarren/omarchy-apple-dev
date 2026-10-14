@@ -77,7 +77,7 @@ for target in "$app" "$app"/PlugIns/*.appex; do
   # sounds. A narrow list, not the device path's full copy, which once stalled App Store processing.
   extra=()
   set -f  # the patterns are for find, not for the shell
-  for pat in ${ROOT_RESOURCES:-}; do extra+=(-o -path "./$pat"); done
+  for pat in ${ROOT_RESOURCES:-}; do extra+=(-o -path "./$pat" ! -path "./*/*"); done
   set +f
   while IFS= read -r -d '' rel; do
     rel=${rel#./}

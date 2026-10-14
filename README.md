@@ -296,7 +296,8 @@ root (storyboards, nibs and the app's own `PrivacyInfo.xcprivacy`) and leaves th
 rest in the bundle. If app code reads other resources through `Bundle.main`, set
 `ROOT_RESOURCES` to the space-separated patterns to move as well, for example
 `ROOT_RESOURCES='*.lproj *.wav'` for localized strings, `InfoPlist.strings` and
-sounds. Keep the list short: copying everything into an upload once stalled App
+sounds. The patterns match only top-level entries of each resource bundle, and they
+apply to the app and to each extension bundle. Keep the list short: copying everything into an upload once stalled App
 Store processing (`--device` builds still copy everything).
 
 For HTTPS authentication callbacks, set `ASC_ENTITLEMENTS_PATH` to the app's
