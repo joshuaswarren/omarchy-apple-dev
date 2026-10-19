@@ -68,7 +68,7 @@ FLOW_LAYOUT_DEFAULT_SPACING = 10.0
 ESTIMATED_ITEM_SIZE = "{1.7976931348623157e+308, 1.7976931348623157e+308}"
 EVENT_MASKS = {"touchUpInside": 64, "valueChanged": 4096}
 LINE_BREAK_MODES = {"wordWrap": 0, "characterWrap": 1, "clip": 2,
-                    "headTruncation": 3, "middleTruncation": 4, "tailTruncation": 5}
+                    "headTruncation": 3, "tailTruncation": 4, "middleTruncation": 5}
 RESIZE_FLAGS = {"widthSizable": 2, "heightSizable": 16, "flexibleMinX": 1,
                 "flexibleMaxX": 4, "flexibleMinY": 8, "flexibleMaxY": 32}
 BUTTON_STATES = {"normal": 0, "highlighted": 1}
@@ -434,16 +434,22 @@ def _build_font_new(b, fd, where):
     if fd.get("type") not in ("system", "boldSystem") or fd.get("pointSize") is None:
         raise XibError(f"unsupported fontDescription {fd.attrib} ({where})")
     size = float(fd.get("pointSize"))
-    # boldSystem (React Native's template LaunchScreen) as the emphasized UI
-    # font with the bold trait; not yet checked against an Apple golden.
+    # boldSystem (golden HelloWorld LaunchScreen, React Native's template):
+    # .SFUI-Bold, the emphasized usage overridden by the bold usage, in a
+    # mutable dictionary, with the bold trait.
     bold = fd.get("type") == "boldSystem"
-    name = ".SFUI-Semibold" if bold else ".SFUI-Regular"
+    name = ".SFUI-Bold" if bold else ".SFUI-Regular"
     f = b.new("UIFont")
     f.add("UIFontName", *b.ref(b.string(name)))
     desc = b.new("UIFontDescriptor")  # shell first: golden creates it before the dict
-    entries = [("NSCTFontUIUsageAttribute", "CTFontEmphasizedUsage" if bold else "CTFontRegularUsage"),
-               ("NSFontSizeAttribute", None)]
-    attrs = b.new("NSDictionary")
+    if bold:
+        entries = [("NSCTFontUIUsageAttribute", "CTFontEmphasizedUsage"),
+                   ("NSCTFontUIUsageOverrideAttribute", "CTFontBoldUsage"),
+                   ("NSFontSizeAttribute", None)]
+    else:
+        entries = [("NSCTFontUIUsageAttribute", "CTFontRegularUsage"),
+                   ("NSFontSizeAttribute", None)]
+    attrs = b.new("NSMutableDictionary" if bold else "NSDictionary")
     attrs.add("NSInlinedValue", *b.boolean(False))
     for k, v in entries:
         attrs.add("UINibEncoderEmptyKey", *b.ref(b.string(k)))
@@ -721,16 +727,16 @@ def build_label(b, el, where, resources=None, named=None):
     o.add("UICenter", *b.geom(cx, cy))
     o.add("UIDeepDrawRect", *b.boolean(False))
     o.add("UIUserInteractionDisabled", *b.boolean(_attr(el, "userInteractionEnabled", where) != "NO"))
-    # clipsSubviews: as on the other views here (stored inverted). Follows this
-    # tool's own encoding; not yet checked against an Apple golden.
-    if el.get("clipsSubviews") is not None:
-        o.add("UIClipsToBounds", *b.boolean(el.get("clipsSubviews") != "YES"))
     o.add("UIAutoresizeSubviews", *b.boolean(False))
     o.add("UIAutoresizingMask", *b.int8(36))  # IB's default for translates=NO
     cm = _attr(el, "contentMode", where)
     if cm not in CONTENT_MODES:
         raise XibError(f"<label> contentMode={cm!r} not supported ({where})")
     o.add("UIContentMode", *b.int8(CONTENT_MODES[cm]))
+    # clipsSubviews, stored inverted as on the other views, after the content
+    # mode (golden HelloWorld LaunchScreen).
+    if el.get("clipsSubviews") is not None:
+        o.add("UIClipsToBounds", *b.boolean(el.get("clipsSubviews") != "YES"))
     translates = el.get("translatesAutoresizingMaskIntoConstraints")
     if translates is None:
         raise XibError(f"<label> is missing translatesAutoresizingMaskIntoConstraints ({where})")
@@ -770,8 +776,8 @@ def build_label(b, el, where, resources=None, named=None):
     fit = el.get("adjustsFontSizeToFit")
     if fit is None:
         o.add("UIAdjustsFontSizeToFit", *b.boolean(False))
-        # An explicit minimumFontSize (React Native's template) in place of the
-        # default 8.5; not yet checked against an Apple golden.
+        # An explicit minimumFontSize in place of the default 8.5 (golden
+        # HelloWorld LaunchScreen).
         o.add("UIMinimumFontSize", *b.float32(float(el.get("minimumFontSize", "8.5"))))
     nol = el.get("numberOfLines")
     if nol is not None and nol != "1":
@@ -788,6 +794,15 @@ def build_label(b, el, where, resources=None, named=None):
     msf = el.get("minimumScaleFactor")
     if msf is not None:
         o.add("UIMinimumScaleFactor", *b.float32(float(msf)))
+    elif el.get("minimumFontSize") is not None:
+        # The legacy minimumFontSize also gives a scale factor, minimumFontSize
+        # over the point size as a float (golden HelloWorld LaunchScreen: 18/36
+        # -> 0.5, 9/17 -> 0.5294118).
+        ps = _sub(el, "fontDescription", where).get("pointSize")
+        if ps is None:
+            raise XibError(f"<label> minimumFontSize without a font pointSize ({where})")
+        o.add("UIMinimumScaleFactor",
+              *b.float32(float(el.get("minimumFontSize")) / float(ps)))
     if el.get("adjustsLetterSpacingToFitWidth") is not None:
         o.add("UIAdjustsLetterSpacingToFit", *b.boolean(False))
     pmw = el.get("preferredMaxLayoutWidth")
@@ -1363,14 +1378,17 @@ def _bplist_bytes(plist, alias_entry_key=False):
 
 
 def _add_multiplier(b, o, el):
-    """NSLayoutConstraint's NSMultiplier for multiplier="1/3" or "0.5" (React
-    Native's template LaunchScreen). Written only when it is not 1,
-    so the goldens are unchanged; its place among the keys is unverified."""
+    """NSLayoutConstraint's NSMultiplier for multiplier="1/3" or "0.5", after
+    NSFirstAttribute and NSRelation, before NSSecondItem, written only when it
+    is not 1. The value is a float widened to a double (golden HelloWorld
+    LaunchScreen: 1/3 -> 0.3333333432674408; Xcode 27.1 probe with a >=
+    relation)."""
     m = el.get("multiplier")
-    if m is None:
+    if m is None or el.get("secondItem") is None:
         return
     num, _, den = m.partition("/")
     value = float(num) / float(den) if den else float(num)
+    value = struct.unpack("<f", struct.pack("<f", value))[0]
     if value != 1.0:
         o.add("NSMultiplier", *b.float64(value))
 
@@ -1387,6 +1405,7 @@ def build_constraint(b, el, owner, id_map, where):
     rel = RELATIONS.get(el.get("relation", "equal"))
     if rel is not None:
         o.add("NSRelation", *b.int8(rel))
+    _add_multiplier(b, o, el)
     second = el.get("secondItem")
     if second is not None:
         o.add("NSSecondItem", *b.ref(id_map[second]))
@@ -1395,7 +1414,6 @@ def build_constraint(b, el, owner, id_map, where):
             raise XibError(f"<constraint> secondItem without secondAttribute ({where})")
         o.add("NSSecondAttributeV2", *b.int8(ATTRIBUTES.get(sa, MARGIN_V2.get(sa, 0))))
         o.add("NSSecondAttribute", *b.int8(ATTRIBUTES.get(MARGIN_BASE.get(sa, sa), 0)))
-        _add_multiplier(b, o, el)
     # Margin-attribute constraints carry a legacy NSConstant next to (or
     # instead of) NSConstantV2: the resolved offset in the pre-margin space.
     # Default margins are 8pt. A margin on the second item resolves +8 for
@@ -1431,8 +1449,8 @@ def build_constraint(b, el, owner, id_map, where):
 # constraint belongs to its first item, or to its second item when the first is
 # the owner view. Layout-guide groups come first, then view groups by the
 # distance of the item's frame origin from (0, 0), then by x. Inside a group:
-# constraints to the owner view first (same attribute on both sides, in
-# OWNER_ORDER), then the rest in OTHER_ORDER of the group item's attribute;
+# constraints to the owner view first (in OWNER_ORDER of the item's attribute,
+# on iOS also when the owner's attribute differs: Xcode 27.1 probes), then the rest in OTHER_ORDER of the group item's attribute;
 # ties by relation (<=, >=, =), then by the other item's subview index.
 OWNER_ORDER = ("width", "height", "centerX", "centerY", "trailing", "leading", "bottom", "top")
 OTHER_ORDER = ("centerX", "trailing", "leading", "centerY", "bottom", "top", "width", "height")
@@ -1552,10 +1570,14 @@ def _constraint_order(view_el, cons, where, mac=False):
                 raise XibError(f"constraint {c.get('id')}: no frame for item {item!r}; "
                                f"Apple's order unknown ({where})")
         rel = RELATION_ORDER[c.get("relation", "equal")]
-        # A constraint to the owner view on another attribute (React
-        # Native's template LaunchScreen: label centerY = view bottom * 1/3) sorts
-        # like one to a sibling; the order is unverified (UIKit doesn't depend on it).
-        if other == owner and (MARGIN_BASE.get(oattr, oattr) == attr and attr in OWNER_ORDER):
+        # A constraint to the owner view on another attribute sorts with the
+        # owner constraints too, by the item's attribute (iOS golden HelloWorld
+        # LaunchScreen: label centerY = view bottom * 1/3 precedes the label's
+        # leading constraint to the safe area). Unverified on macOS.
+        if other == owner:
+            if attr not in OWNER_ORDER or (mac and MARGIN_BASE.get(oattr, oattr) != attr):
+                raise XibError(f"constraint {c.get('id')}: {attr}/{oattr} to the owner view; "
+                               f"Apple's order unknown ({where})")
             if mac:
                 # relation ties break before the attribute (probe RenameSheet:
                 # the >= leading constraint precedes the equal trailing one)
@@ -1606,6 +1628,7 @@ def build_constraints_block(b, view_el, owner, id_map, where, guides=None, rel_i
             rel = RELATIONS.get(c.get("relation", "equal"))
             if rel is not None:
                 o.add("NSRelation", *(b.int8(rel) if rel_int is None else (rel_int, rel)))
+            _add_multiplier(b, o, c)
             second = c.get("secondItem")
             if second is not None:
                 if guides is not None and second in guides:
@@ -1617,7 +1640,6 @@ def build_constraints_block(b, view_el, owner, id_map, where, guides=None, rel_i
                     raise XibError(f"<constraint> secondItem without secondAttribute ({where})")
                 o.add("NSSecondAttributeV2", *b.int8(ATTRIBUTES.get(sa, MARGIN_V2.get(sa, 0))))
                 o.add("NSSecondAttribute", *b.int8(ATTRIBUTES.get(MARGIN_BASE.get(sa, sa), 0)))
-                _add_multiplier(b, o, c)
             if any(a in MARGIN_V2 for a in (fa, c.get("secondAttribute"))):
                 raise XibError(f"<constraint> margin attributes unverified in storyboard "
                                f"guide scenes ({where})")
@@ -4654,6 +4676,13 @@ SB_SELF_TEST = (
     ("Flutter Runner white-quarter-tenth.storyboardc",
      "Runner/Base.lproj/white-quarter-tenth.storyboard",
      "Runner/Base.lproj/white-quarter-tenth.storyboardc"),
+    # React Native's template LaunchScreen (react-native-community/template):
+    # clipsSubviews and minimumFontSize on labels, a boldSystem font, and an
+    # owner constraint on another attribute with multiplier 1/3. Golden from
+    # Xcode 27.1 (27A9275); the frames are explicit, so the 27.0 corpus agrees.
+    ("React Native HelloWorld LaunchScreen.storyboardc",
+     "HelloWorld/LaunchScreen.storyboard",
+     "HelloWorld/LaunchScreen.storyboardc"),
 )
 # (label, source, golden nib, --minimum-deployment-target): one scene nib that
 # Apple's ibtool writes differently below iOS 17 (tests/ibtool/golden-pre17,
@@ -4710,7 +4739,10 @@ def self_test():
         TARGET_MODULE = "NetNewsWire" if src_rel.startswith("NetNewsWire/") else None
         tmp = tempfile.mkdtemp(prefix="/tmp/ibtool-sbtest-")
         dirpart = os.path.dirname(golden_rel)
-        module = dirpart.split("/")[0] if "/" in dirpart else ""
+        # The module segment: Mastodon/Base.lproj -> Mastodon, HelloWorld ->
+        # HelloWorld; NetNewsWire's legacy Base.lproj or top level -> none.
+        top = dirpart.split("/")[0]
+        module = top if top and not top.endswith(".lproj") else ""
         sbc = compile_storyboard(os.path.join(SRC, src_rel),
                                  os.path.join(tmp, "stage", dirpart))
         # Apple's --link nests only the .lproj parent under OUT; the module

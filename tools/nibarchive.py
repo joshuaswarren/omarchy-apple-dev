@@ -356,7 +356,8 @@ def self_test():
     for label, src_rel, golden_rel in ibtool.SB_SELF_TEST:
         tmp = tempfile.mkdtemp(prefix="/tmp/nibarchive-sbtest-")
         dirpart = os.path.dirname(golden_rel)
-        module = dirpart.split("/")[0] if "/" in dirpart else ""
+        top = dirpart.split("/")[0]  # as ibtool's self-test: HelloWorld -> HelloWorld
+        module = top if top and not top.endswith(".lproj") else ""
         sbc = ibtool.compile_storyboard(
             os.path.join(ibtool.SRC, src_rel),
             os.path.join(tmp, "stage", dirpart))

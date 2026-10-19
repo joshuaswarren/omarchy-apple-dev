@@ -1,7 +1,8 @@
 """tools/ibtool on React Native's template LaunchScreen.storyboard
 (tests/ibtool/src/HelloWorld, unchanged from react-native-community/template,
-MIT). There is no Apple golden for it yet, so this checks that it compiles and
-that the values it uses come out as written, not the byte layout."""
+MIT). The byte layout is checked against Apple's golden (tests/ibtool/golden/
+HelloWorld, Xcode 27.1) by `tools/ibtool --self-test`; this checks the decoded
+values."""
 import subprocess
 import sys
 import tempfile
@@ -41,15 +42,23 @@ class ReactNativeLaunchScreen(unittest.TestCase):
 
     def test_minimum_font_sizes(self):
         self.assertEqual(self.get("UIMinimumFontSize"), ["float 18.0", "float 9.0"])
+        # minimumFontSize / pointSize, as a float: 18/36 and 9/17
+        self.assertEqual(self.get("UIMinimumScaleFactor"),
+                         ["float 0.5", "float 0.529411792755127"])
+
+    def test_middle_truncation(self):
+        self.assertEqual(self.get("UILineBreakMode"), ["int 5"])
 
     def test_bold_system_font(self):
         names = self.get("UIFontName")
-        self.assertTrue(names[0].startswith("string '.SFUI-Semibold'"), names)
+        self.assertTrue(names[0].startswith("string '.SFUI-Bold'"), names)
         self.assertTrue(names[1].startswith("string '.SFUI-Regular'"), names)
         self.assertEqual(self.get("UIFontTraits"), ["int 2", "int 0"])
+        self.assertIn("string 'CTFontBoldUsage'", " ".join(v for _, v in self.view))
 
     def test_multiplier(self):
-        self.assertEqual(self.get("NSMultiplier"), [f"double {1 / 3!r}"])
+        # 1/3 as a float, widened to a double (Apple's golden)
+        self.assertEqual(self.get("NSMultiplier"), ["double 0.3333333432674408"])
 
 
 if __name__ == "__main__":
