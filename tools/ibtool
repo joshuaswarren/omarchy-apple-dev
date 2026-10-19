@@ -405,7 +405,7 @@ def build_font(b, fd, where):
         obj = _build_font_new(b, fd, where)
         b.fonts[key] = obj
         return obj
-    key = ("system", fd.get("pointSize"))
+    key = (fd.get("type"), fd.get("pointSize"))
     if key in b.fonts:
         return b.fonts[key]
     obj = _build_font_new(b, fd, where)
@@ -431,14 +431,17 @@ def _build_font_new(b, fd, where):
         f.add("NSName", *b.ref(b.string(name)))  # pool hit
         f.add("NSSize", *b.float64(size))
         return f
-    if fd.get("type") != "system" or fd.get("pointSize") is None:
+    if fd.get("type") not in ("system", "boldSystem") or fd.get("pointSize") is None:
         raise XibError(f"unsupported fontDescription {fd.attrib} ({where})")
     size = float(fd.get("pointSize"))
-    name = ".SFUI-Regular"
+    # boldSystem (React Native's template LaunchScreen) as the emphasized UI
+    # font with the bold trait; not yet checked against an Apple golden.
+    bold = fd.get("type") == "boldSystem"
+    name = ".SFUI-Semibold" if bold else ".SFUI-Regular"
     f = b.new("UIFont")
     f.add("UIFontName", *b.ref(b.string(name)))
     desc = b.new("UIFontDescriptor")  # shell first: golden creates it before the dict
-    entries = [("NSCTFontUIUsageAttribute", "CTFontRegularUsage"),
+    entries = [("NSCTFontUIUsageAttribute", "CTFontEmphasizedUsage" if bold else "CTFontRegularUsage"),
                ("NSFontSizeAttribute", None)]
     attrs = b.new("NSDictionary")
     attrs.add("NSInlinedValue", *b.boolean(False))
@@ -457,7 +460,7 @@ def _build_font_new(b, fd, where):
     f.add("UIFontTextStyleForScaling", N.NIL, None)
     f.add("UIFontPointSizeForScaling", *b.float64(0.0))
     f.add("UIFontMaximumPointSizeAfterScaling", *b.float64(0.0))
-    f.add("UIFontTraits", *b.int8(0))
+    f.add("UIFontTraits", *b.int8(2 if bold else 0))
     f.add("UISystemFont", *b.boolean(False))
     f.add("NSName", *b.ref(b.string(name)))  # pool hit
     f.add("NSSize", *b.float64(size))
@@ -488,7 +491,9 @@ ALLOWED_ATTRS = {
               "preferredMaxLayoutWidth", "horizontalCompressionResistancePriority",
               "verticalCompressionResistancePriority", "ambiguous",
               "customClass", "customModule", "customModuleProvider",
-              "userLabel"},
+              "userLabel",
+              # React Native's template LaunchScreen labels
+              "clipsSubviews", "minimumFontSize"},
     "placeholder": {"placeholderIdentifier", "id", "userLabel", "customClass"},
     "tableViewCell": {"clipsSubviews", "contentMode",
                       "preservesSuperviewLayoutMargins", "selectionStyle",
@@ -716,6 +721,10 @@ def build_label(b, el, where, resources=None, named=None):
     o.add("UICenter", *b.geom(cx, cy))
     o.add("UIDeepDrawRect", *b.boolean(False))
     o.add("UIUserInteractionDisabled", *b.boolean(_attr(el, "userInteractionEnabled", where) != "NO"))
+    # clipsSubviews: as on the other views here (stored inverted). Follows this
+    # tool's own encoding; not yet checked against an Apple golden.
+    if el.get("clipsSubviews") is not None:
+        o.add("UIClipsToBounds", *b.boolean(el.get("clipsSubviews") != "YES"))
     o.add("UIAutoresizeSubviews", *b.boolean(False))
     o.add("UIAutoresizingMask", *b.int8(36))  # IB's default for translates=NO
     cm = _attr(el, "contentMode", where)
@@ -761,7 +770,9 @@ def build_label(b, el, where, resources=None, named=None):
     fit = el.get("adjustsFontSizeToFit")
     if fit is None:
         o.add("UIAdjustsFontSizeToFit", *b.boolean(False))
-        o.add("UIMinimumFontSize", *b.float32(8.5))
+        # An explicit minimumFontSize (React Native's template) in place of the
+        # default 8.5; not yet checked against an Apple golden.
+        o.add("UIMinimumFontSize", *b.float32(float(el.get("minimumFontSize", "8.5"))))
     nol = el.get("numberOfLines")
     if nol is not None and nol != "1":
         o.add("UINumberOfLines", *b.int8(int(nol)))
@@ -1351,6 +1362,19 @@ def _bplist_bytes(plist, alias_entry_key=False):
     return out
 
 
+def _add_multiplier(b, o, el):
+    """NSLayoutConstraint's NSMultiplier for multiplier="1/3" or "0.5" (React
+    Native's template LaunchScreen). Written only when it is not 1,
+    so the goldens are unchanged; its place among the keys is unverified."""
+    m = el.get("multiplier")
+    if m is None:
+        return
+    num, _, den = m.partition("/")
+    value = float(num) / float(den) if den else float(num)
+    if value != 1.0:
+        o.add("NSMultiplier", *b.float64(value))
+
+
 def build_constraint(b, el, owner, id_map, where):
     o = b.new("NSLayoutConstraint")
     first = el.get("firstItem")
@@ -1371,6 +1395,7 @@ def build_constraint(b, el, owner, id_map, where):
             raise XibError(f"<constraint> secondItem without secondAttribute ({where})")
         o.add("NSSecondAttributeV2", *b.int8(ATTRIBUTES.get(sa, MARGIN_V2.get(sa, 0))))
         o.add("NSSecondAttribute", *b.int8(ATTRIBUTES.get(MARGIN_BASE.get(sa, sa), 0)))
+        _add_multiplier(b, o, el)
     # Margin-attribute constraints carry a legacy NSConstant next to (or
     # instead of) NSConstantV2: the resolved offset in the pre-margin space.
     # Default margins are 8pt. A margin on the second item resolves +8 for
@@ -1527,10 +1552,10 @@ def _constraint_order(view_el, cons, where, mac=False):
                 raise XibError(f"constraint {c.get('id')}: no frame for item {item!r}; "
                                f"Apple's order unknown ({where})")
         rel = RELATION_ORDER[c.get("relation", "equal")]
-        if other == owner:
-            if MARGIN_BASE.get(oattr, oattr) != attr or attr not in OWNER_ORDER:
-                raise XibError(f"constraint {c.get('id')}: {attr}/{oattr} to the owner view; "
-                               f"Apple's order unknown ({where})")
+        # A constraint to the owner view on another attribute (React
+        # Native's template LaunchScreen: label centerY = view bottom * 1/3) sorts
+        # like one to a sibling; the order is unverified (UIKit doesn't depend on it).
+        if other == owner and (MARGIN_BASE.get(oattr, oattr) == attr and attr in OWNER_ORDER):
             if mac:
                 # relation ties break before the attribute (probe RenameSheet:
                 # the >= leading constraint precedes the equal trailing one)
@@ -1592,6 +1617,7 @@ def build_constraints_block(b, view_el, owner, id_map, where, guides=None, rel_i
                     raise XibError(f"<constraint> secondItem without secondAttribute ({where})")
                 o.add("NSSecondAttributeV2", *b.int8(ATTRIBUTES.get(sa, MARGIN_V2.get(sa, 0))))
                 o.add("NSSecondAttribute", *b.int8(ATTRIBUTES.get(MARGIN_BASE.get(sa, sa), 0)))
+                _add_multiplier(b, o, c)
             if any(a in MARGIN_V2 for a in (fa, c.get("secondAttribute"))):
                 raise XibError(f"<constraint> margin attributes unverified in storyboard "
                                f"guide scenes ({where})")
