@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Development signing identity for one iOS bundle id and one device, through the App Store Connect API.
 
-usage: provision-dev.py --bundle-id ID [ID...] [--udid UDID] [--name NAME] [--out DIR] [--expect-group GROUP]
+usage: provision-dev.py --bundle-id ID [ID...] [--udid UDID [UDID ...]] [--name NAME] [--out DIR] [--expect-group GROUP]
 
 Needs ASC_KEY_ID, ASC_ISSUER_ID and ASC_KEY_PATH, like ship.sh. It makes a local RSA key and a CSR, asks
 Apple for an iOS Development certificate, registers the device (or, without --udid, attaches every
@@ -83,7 +83,7 @@ def profile(bundle_id, cert_id, device_ids, out):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--bundle-id", required=True, nargs="+")
-    ap.add_argument("--udid")
+    ap.add_argument("--udid", nargs="+")
     ap.add_argument("--name", default="iPhone")
     ap.add_argument("--out", default=str(Path.home() / ".config/omarchy-apple-dev/development"))
     ap.add_argument("--expect-group")
@@ -91,7 +91,7 @@ def main():
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True, mode=0o700)
     cert_id = certificate(out)
-    device_ids = [device(a.udid, a.name)] if a.udid else all_devices()
+    device_ids = [device(u, a.name) for u in a.udid] if a.udid else all_devices()
     print(f"certificate {cert_id}, {len(device_ids)} device(s)")
     missing = []
     for bundle_id in a.bundle_id:
