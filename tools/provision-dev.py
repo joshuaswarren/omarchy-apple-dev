@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Development signing identity for one iOS bundle id and one device, through the App Store Connect API.
+"""Development signing identity for one iOS bundle id and one or more devices, through the App Store Connect API.
 
 usage: provision-dev.py --bundle-id ID [ID...] [--udid UDID [UDID ...]] [--name NAME] [--out DIR] [--expect-group GROUP]
+(--name is the portal name for every NEW device; with several new devices, register them first or rename them in the portal.)
 
 Needs ASC_KEY_ID, ASC_ISSUER_ID and ASC_KEY_PATH, like ship.sh. It makes a local RSA key and a CSR, asks
 Apple for an iOS Development certificate, registers the device (or, without --udid, attaches every
