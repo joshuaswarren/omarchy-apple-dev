@@ -743,6 +743,21 @@ def capability_entitlements(requested, granted, ident):
     return signed
 
 
+def link_signing_file(dest, src):
+    """Makes ship-signing/<name> a link to the signing key or certificate. The link is absolute: a
+    relative one would resolve against ship-signing, not the directory the path was given in. A
+    destination that already is the source (the same file, or a link to it) is left as it is: the
+    source may be the very file in ship-signing, and unlinking it would lose the key. A link to
+    something else is replaced. A regular file that is not the source is not ours to remove."""
+    src = Path(os.path.abspath(src))
+    if dest.exists() and src.exists() and os.path.samefile(dest, src):
+        return
+    if dest.exists() and not dest.is_symlink():
+        die(f"{dest} is a file that is not {src}; remove it or give that path, nothing was replaced")
+    dest.unlink(missing_ok=True)
+    dest.symlink_to(src)
+
+
 def install_all_bundles(app_dir, out_dir, prov_for, key_path, cert_path):
     """For every bundle (app + each PlugIns/*.appex): embed the profile, write a per-bundle
     entitlements plist (application-identifier, team-identifier, beta-reports-active if granted,
@@ -783,9 +798,7 @@ def install_all_bundles(app_dir, out_dir, prov_for, key_path, cert_path):
         print(f"identity for {entitlements['application-identifier']}: profile {payload['UUID']}, "
               f"expires {payload['ExpirationDate']:%Y-%m-%d}")
     for name, src in (("key.pem", key_path), ("cert.der", cert_path)):
-        dest = out / name
-        dest.unlink(missing_ok=True)
-        dest.symlink_to(src)
+        link_signing_file(out / name, src)
 
 
 def bundle_identifier(app_dir):
