@@ -15,7 +15,7 @@ def signer_namespace():
     source = (Path(__file__).resolve().parents[1] / "tools/asc.py").read_text()
     names = {'associated_domains_allowed', 'requested_associated_domains',
              'requested_capabilities', 'capability_entitlements',
-             'install_all_bundles', '_check_signature_seals'}
+             'install_all_bundles', 'link_signing_file', '_check_signature_seals'}
     tree = ast.parse(source)
     tree.body = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in names]
     if {node.name for node in tree.body} != names:
