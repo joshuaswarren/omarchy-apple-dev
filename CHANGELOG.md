@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### A signed-app fixture for the profile, seal and extension checks
+
+- `tests/asc/appex-seal.py` runs the signing steps of `ship.sh` (test identity, then `rcodesign` on the extension and the app) on a synthetic app with one app extension, packages the `.ipa` and runs `asc.py validate` on it. Before, the profile, seal and extension paths of `validate` ran only on real apps, because `tests/asc/golden-validate.py` uses an unsigned app and a stub `rcodesign`. Seven rows: the clean case with all eleven extension lines `ok`; then an edited extension `Info.plist`, a file added to the extension, a changed extension executable, the app's profile put in the extension, an edited app `Info.plist` (the extension's seal stays `ok`) and a deleted app profile each fail the line they should. Three mutants (skip the extensions, always pass either sealed-hash check) fail the rows they name.
+- The test skips with exit 0 when `rcodesign` or `cryptography` is missing, so `ubuntu-latest` skips it and it runs on a host that has `rcodesign`. It signs with `--timestamp-url none`, so it needs no network; `ship.sh` signs with Apple's timestamp server. The fixture has no asset catalog, so the two `Assets.car` lines fail on every row and the rows ignore them.
+
 ### Signing with a given identity and profile
 
 - `flutter/ship.sh` signs with an Apple Distribution identity and an App Store profile it is given when `ASC_PROFILE` is set, with `ASC_SIGNING_KEY` (the path of the PEM private key file) and `ASC_SIGNING_CERT` (the path of its certificate, DER). The new `asc.py given-identity` makes no App Store Connect call and creates no certificate, so a build machine needs neither the API key nor a certificate of its own; before, `asc.py identity` made one per machine, and a team with three machines hit Apple's limit of distribution certificates. The profile must be for the app's bundle id, in the export options' team, and list the certificate, and the key must be the certificate's. An app with extensions is refused, since each extension needs a profile of its own. `ASC_PROFILE` wins over `ASC_KEY_ID`; `--upload` still needs the API key.

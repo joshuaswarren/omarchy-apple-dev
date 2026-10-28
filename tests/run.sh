@@ -22,6 +22,9 @@ bash tests/xcodeproj2xtool/golden-fixture.sh || fail=1
 echo "== tools/asc.py validate golden"
 python3 tests/asc/golden-validate.py || fail=1
 
+echo "== tools/asc.py validate on a signed app with an extension (real rcodesign; skips without it)"
+python3 tests/asc/appex-seal.py || fail=1
+
 echo "== tests/test_*.py (unittest)"
 python3 -m unittest discover -s tests -p 'test_*.py' || fail=1
 
