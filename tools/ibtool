@@ -933,11 +933,11 @@ def build_content_view(b, el, where, resources, roles, id_map, named=None):
     o.add("UIViewSemanticContentAttribute", *b.int8(0))
     o.add("UIViewLargeContentStoredProperties", N.NIL, None)
     return o, kids, tail, events, pairs
-def build_cell(b, el, where, resources, named=None, id_map=None):
-    """<tableViewCell> -> UIClassSwapper (Apple wraps custom-class cells)."""
-    _check_shape(el, where)
-    id_map = {} if id_map is None else id_map
-    x, y, w, h = _frame(el)
+
+
+def _cell_shell(b, el, w, h):
+    """The cell object and its subviews array, with the view keys that come
+    before the contentView subtree in the golden nibs."""
     (_, _, _, _), (cx, cy) = _bounds_center(el)
     o = b.new("UITableViewCell" if el.get("customClass") is None else "UIClassSwapper")
     subs = b.new("NSMutableArray")  # shell; contentView + synthesized separator
@@ -955,21 +955,11 @@ def build_cell(b, el, where, resources, named=None, id_map=None):
         o.add("UIViewPreservesSpecificSuperviewMargins", *b.int8(15))
     o.add("UIViewSemanticContentAttribute", *b.int8(0))
     o.add("UIViewLargeContentStoredProperties", N.NIL, None)
+    return o, subs
 
-    cv_el = el.find("tableViewCellContentView[@key='contentView']")
-    if cv_el is None:
-        raise XibError(f"<tableViewCell> has no contentView ({where})")
-    roles = {}
-    if el.get("textLabel"):
-        roles[el.get("textLabel")] = "text"
-    if el.get("detailTextLabel"):
-        roles[el.get("detailTextLabel")] = "detail"
-    # Creation order = golden: contentView subtree, separator, then the
-    # swapper's own strings (reuse identifier, class names).
-    if el.get("id"):
-        id_map[el.get("id")] = o
-    cv, kids, tail, kevents, kpairs = build_content_view(b, cv_el, where, resources, roles, id_map, named)
-    # Apple synthesizes the separator: 1pt full-width view at the cell bottom.
+
+def _cell_separator(b, w, h):
+    """Apple synthesizes the separator: 1pt full-width view at the cell bottom."""
     sep = b.new("_UITableViewCellSeparatorView")
     sep.add("UIBounds", *b.geom(0.0, 0.0, w - 8.0, 1.0))
     sep.add("UICenter", *b.geom(8.0 + (w - 8.0) / 2, h - 0.5))
@@ -978,77 +968,82 @@ def build_cell(b, el, where, resources, named=None, id_map=None):
     sep.add("UIAutoresizeSubviews", *b.boolean(False))
     sep.add("UIViewSemanticContentAttribute", *b.int8(0))
     sep.add("UIViewLargeContentStoredProperties", N.NIL, None)
-    subs.add("UINibEncoderEmptyKey", *b.ref(cv))
-    subs.add("UINibEncoderEmptyKey", *b.ref(sep))
+    return sep
 
-    # selectionStyle="none" cells (and all plain cells) carry a synthesized
-    # system background (oracle: the insetGrouped Settings/Feed static cells).
-    bgview = None
-    plain_color = None
-    if el.get("selectionStyle") == "none" or el.get("customClass") is None:
-        plain_color = build_color(b, "tableCellPlainBackgroundColor", where)
-        bgview = b.new("_UISystemBackgroundView")
-        bgview.add("UIBounds", *b.geom(0.0, 0.0, w, math.ceil(h)))
-        bgview.add("UICenter", *b.geom(w / 2, math.ceil(h) / 2))
-        bgview.add("UIDeepDrawRect", *b.boolean(False))
-        bgview.add("UIOpaque", *b.boolean(False))
-        bgview.add("UIAutoresizeSubviews", *b.boolean(False))
-        bgview.add("UIViewSemanticContentAttribute", *b.int8(0))
-        bgview.add("UIViewLargeContentStoredProperties", N.NIL, None)
-        cfg = b.new("UIBackgroundConfiguration")
-        cfg.add("customView", N.NIL, None)
-        cfg.add("hasCustomized-customView", *b.boolean(True))
-        cfg.add("cornerRadius", *b.float64(0.0))
-        cfg.add("hasCustomized-cornerRadius", *b.boolean(True))
-        cfg.add("maskedCorners", *b.int8(15))
-        cfg.add("hasCustomized-maskedCorners", *b.boolean(True))
-        cfg.add("backgroundColor", *b.ref(plain_color))
-        cfg.add("hasCustomized-backgroundColor", *b.boolean(True))
-        cfg.add("backgroundColorTransformerIdentifier", *b.int8(0))
-        cfg.add("hasCustomized-backgroundColorTransformerIdentifier", *b.boolean(True))
-        cfg.add("visualEffect", N.NIL, None)
-        cfg.add("hasCustomized-visualEffect", *b.boolean(True))
-        cfg.add("visualEffectGroupName", N.NIL, None)
-        cfg.add("hasCustomized-visualEffectGroupName", *b.boolean(True))
-        cfg.add("visualEffectblurClippingMode", *b.int8(0))
-        cfg.add("image", N.NIL, None)
-        cfg.add("hasCustomized-image", *b.boolean(True))
-        cfg.add("imageContentMode", *b.int8(0))
-        cfg.add("hasCustomized-imageContentMode", *b.boolean(True))
-        cfg.add("backgroundInsets", *b.ref(b.string("{0, 0, 0, 0}")))
-        cfg.add("hasCustomized-backgroundInsets", *b.boolean(True))
-        cfg.add("edgesAddingLayoutMarginsToBackgroundInsets", *b.int8(0))
-        cfg.add("hasCustomized-edgesAddingLayoutMarginsToBackgroundInsets", *b.boolean(True))
-        clear = build_color(b, "clearColor", where)
-        cfg.add("strokeColor", *b.ref(clear))
-        cfg.add("hasCustomized-strokeColor", *b.boolean(True))
-        cfg.add("strokeColorTransformerIdentifier", *b.int8(0))
-        cfg.add("hasCustomized-strokeColorTransformerIdentifier", *b.boolean(True))
-        cfg.add("strokeWidth", *b.float64(0.0))
-        cfg.add("hasCustomized-strokeWidth", *b.boolean(True))
-        cfg.add("strokeOutset", *b.float64(0.0))
-        cfg.add("hasCustomized-strokeOutset", *b.boolean(True))
-        cfg.add("strokeLocation", *b.int8(0))
-        cfg.add("defaultStyle", *b.int8(1))
-        cfg.add("defaultStyle_v2", *b.int8(11))
-        bgview.add("configurationAPI", *b.ref(cfg))
 
+def _cell_system_background(b, el, w, h, where):
+    """(background view, plain background color), or (None, None).
+
+    selectionStyle="none" cells (and all plain cells) carry a synthesized
+    system background (oracle: the insetGrouped Settings/Feed static cells)."""
+    if el.get("selectionStyle") != "none" and el.get("customClass") is not None:
+        return None, None
+    plain_color = build_color(b, "tableCellPlainBackgroundColor", where)
+    bgview = b.new("_UISystemBackgroundView")
+    bgview.add("UIBounds", *b.geom(0.0, 0.0, w, math.ceil(h)))
+    bgview.add("UICenter", *b.geom(w / 2, math.ceil(h) / 2))
+    bgview.add("UIDeepDrawRect", *b.boolean(False))
+    bgview.add("UIOpaque", *b.boolean(False))
+    bgview.add("UIAutoresizeSubviews", *b.boolean(False))
+    bgview.add("UIViewSemanticContentAttribute", *b.int8(0))
+    bgview.add("UIViewLargeContentStoredProperties", N.NIL, None)
+    cfg = b.new("UIBackgroundConfiguration")
+    cfg.add("customView", N.NIL, None)
+    cfg.add("hasCustomized-customView", *b.boolean(True))
+    cfg.add("cornerRadius", *b.float64(0.0))
+    cfg.add("hasCustomized-cornerRadius", *b.boolean(True))
+    cfg.add("maskedCorners", *b.int8(15))
+    cfg.add("hasCustomized-maskedCorners", *b.boolean(True))
+    cfg.add("backgroundColor", *b.ref(plain_color))
+    cfg.add("hasCustomized-backgroundColor", *b.boolean(True))
+    cfg.add("backgroundColorTransformerIdentifier", *b.int8(0))
+    cfg.add("hasCustomized-backgroundColorTransformerIdentifier", *b.boolean(True))
+    cfg.add("visualEffect", N.NIL, None)
+    cfg.add("hasCustomized-visualEffect", *b.boolean(True))
+    cfg.add("visualEffectGroupName", N.NIL, None)
+    cfg.add("hasCustomized-visualEffectGroupName", *b.boolean(True))
+    cfg.add("visualEffectblurClippingMode", *b.int8(0))
+    cfg.add("image", N.NIL, None)
+    cfg.add("hasCustomized-image", *b.boolean(True))
+    cfg.add("imageContentMode", *b.int8(0))
+    cfg.add("hasCustomized-imageContentMode", *b.boolean(True))
+    cfg.add("backgroundInsets", *b.ref(b.string("{0, 0, 0, 0}")))
+    cfg.add("hasCustomized-backgroundInsets", *b.boolean(True))
+    cfg.add("edgesAddingLayoutMarginsToBackgroundInsets", *b.int8(0))
+    cfg.add("hasCustomized-edgesAddingLayoutMarginsToBackgroundInsets", *b.boolean(True))
+    clear = build_color(b, "clearColor", where)
+    cfg.add("strokeColor", *b.ref(clear))
+    cfg.add("hasCustomized-strokeColor", *b.boolean(True))
+    cfg.add("strokeColorTransformerIdentifier", *b.int8(0))
+    cfg.add("hasCustomized-strokeColorTransformerIdentifier", *b.boolean(True))
+    cfg.add("strokeWidth", *b.float64(0.0))
+    cfg.add("hasCustomized-strokeWidth", *b.boolean(True))
+    cfg.add("strokeOutset", *b.float64(0.0))
+    cfg.add("hasCustomized-strokeOutset", *b.boolean(True))
+    cfg.add("strokeLocation", *b.int8(0))
+    cfg.add("defaultStyle", *b.int8(1))
+    cfg.add("defaultStyle_v2", *b.int8(11))
+    bgview.add("configurationAPI", *b.ref(cfg))
+    return bgview, plain_color
+
+
+def _cell_class_strings(b, el, where):
+    """(reuse identifier, class name, original class name) strings, created in
+    that order; the class names are None for a plain cell."""
     reuse = b.string(el.get("reuseIdentifier")) if el.get("reuseIdentifier") else None
     cls = el.get("customClass")
     # Apple's ibtool takes the module verbatim from --module for customModuleProvider="target".
     module = TARGET_MODULE if el.get("customModuleProvider") == "target" and TARGET_MODULE else el.get("customModule")
-    plain = cls is None
     if not cls:
         if reuse is not None:
             raise XibError(f"<tableViewCell> plain cell with reuseIdentifier not supported ({where})")
-        mangled = "UITableViewCell"
-        cls_str = None
-        orig_str = None
-    else:
-        mangled = f"_TtC{len(module)}{module}{len(cls)}{cls}" if module else cls
-        cls_str = b.string(mangled)
-        orig_str = b.string("UITableViewCell")
+        return reuse, None, None
+    mangled = f"_TtC{len(module)}{module}{len(cls)}{cls}" if module else cls
+    return reuse, b.string(mangled), b.string("UITableViewCell")
 
+
+def _cell_style_keys(b, o, el, plain, reuse, where):
+    """Reuse identifier, style, accessory, selection style and indentation."""
     if not plain and reuse is not None:
         o.add("UIReuseIdentifier", *b.ref(reuse))
     style = el.get("style", "IBUITableViewCellStyleDefault")
@@ -1070,6 +1065,10 @@ def build_cell(b, el, where, resources, named=None, id_map=None):
     elif plain:
         raise XibError(f"<tableViewCell> plain cell needs selectionStyle=none ({where})")
     o.add("UIIndentationWidth", *b.float32(float(el.get("indentationWidth", "10"))))
+
+
+def _cell_view_refs(b, o, el, cv, bgview, id_map):
+    """The background, content and label view references."""
     o.add("UISystemBackgroundView", *b.ref(bgview) if bgview is not None else (N.NIL, None))
     o.add("UIContentConfigurationView", N.NIL, None)
     o.add("UIContentView", *b.ref(cv))
@@ -1082,14 +1081,9 @@ def build_cell(b, el, where, resources, named=None, id_map=None):
     else:
         o.add("UIDetailTextLabel", N.NIL, None)
     o.add("UIImageView", N.NIL, None)
-    if not plain:
-        o.add("UIClassName", *b.ref(cls_str))
-        o.add("UIOriginalClassName", *b.ref(orig_str))
-    if el.get("selectionStyle") == "none":
-        o.values.insert(3, ("UIBackgroundColor",
-                            N.Value(0, N.OBJREF, plain_color.idx)))
-        o.values.insert(4, ("UIDidEncodeCompatibilityBackgroundColor",
-                            N.Value(0, N.FALSE, None)))
+
+
+def _cell_decode_order(o, cv, el, id_map, kids, tail):
     decode_order = [o, cv]
     if el.get("detailTextLabel"):
         decode_order.append(id_map[el.get("detailTextLabel")])
@@ -1100,6 +1094,11 @@ def build_cell(b, el, where, resources, named=None, id_map=None):
     # (golden Inspector nibs: cv cons, then the stack's kid / button's height)
     for group in tail:
         decode_order += group
+    return decode_order
+
+
+def _cell_connections(o, el, id_map, kevents, where):
+    """(outlets, events): the contentView's events first, then the cell's own."""
     outlets = []
     events = [(sel, ksrc, kdst, kev) for (sel, kdst, kev, ksrc) in kevents]
     conns_el = el.find("connections")
@@ -1112,6 +1111,48 @@ def build_cell(b, el, where, resources, named=None, id_map=None):
             outlets.append((prop, dst))
         for ac in conns_el.findall("action"):
             events.append((ac.get("selector"), ac.get("destination"), ac.get("eventType"), o))
+    return outlets, events
+
+
+def build_cell(b, el, where, resources, named=None, id_map=None):
+    """<tableViewCell> -> UIClassSwapper (Apple wraps custom-class cells)."""
+    _check_shape(el, where)
+    id_map = {} if id_map is None else id_map
+    x, y, w, h = _frame(el)
+    o, subs = _cell_shell(b, el, w, h)
+
+    cv_el = el.find("tableViewCellContentView[@key='contentView']")
+    if cv_el is None:
+        raise XibError(f"<tableViewCell> has no contentView ({where})")
+    roles = {}
+    if el.get("textLabel"):
+        roles[el.get("textLabel")] = "text"
+    if el.get("detailTextLabel"):
+        roles[el.get("detailTextLabel")] = "detail"
+    # Creation order = golden: contentView subtree, separator, then the
+    # swapper's own strings (reuse identifier, class names).
+    if el.get("id"):
+        id_map[el.get("id")] = o
+    cv, kids, tail, kevents, kpairs = build_content_view(b, cv_el, where, resources, roles, id_map, named)
+    sep = _cell_separator(b, w, h)
+    subs.add("UINibEncoderEmptyKey", *b.ref(cv))
+    subs.add("UINibEncoderEmptyKey", *b.ref(sep))
+    bgview, plain_color = _cell_system_background(b, el, w, h, where)
+    reuse, cls_str, orig_str = _cell_class_strings(b, el, where)
+
+    plain = el.get("customClass") is None
+    _cell_style_keys(b, o, el, plain, reuse, where)
+    _cell_view_refs(b, o, el, cv, bgview, id_map)
+    if not plain:
+        o.add("UIClassName", *b.ref(cls_str))
+        o.add("UIOriginalClassName", *b.ref(orig_str))
+    if el.get("selectionStyle") == "none":
+        o.values.insert(3, ("UIBackgroundColor",
+                            N.Value(0, N.OBJREF, plain_color.idx)))
+        o.values.insert(4, ("UIDidEncodeCompatibilityBackgroundColor",
+                            N.Value(0, N.FALSE, None)))
+    decode_order = _cell_decode_order(o, cv, el, id_map, kids, tail)
+    outlets, events = _cell_connections(o, el, id_map, kevents, where)
     pairs = _uda_pairs(b, el, o, resources, named) + kpairs
     return o, decode_order, outlets, events, pairs, cv, kids
 
