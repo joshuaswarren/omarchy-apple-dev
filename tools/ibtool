@@ -2817,6 +2817,190 @@ def _events_under(el, id_map, where):
     return sorted(out)
 
 
+def _prototype_shell(b, el, w, h, cx, cy):
+    """The prototype's UIClassSwapper and its subviews array."""
+    cell = b.new("UIClassSwapper")
+    cell.add("UIBounds", *b.geom(0.0, 0.0, w, h))
+    cell.add("UICenter", *b.geom(cx, cy))
+    subs = b.new("NSMutableArray")
+    subs.add("NSInlinedValue", *b.boolean(False))
+    cell.add("UISubviews", *b.ref(subs))
+    # UIBackgroundColor sits right after UISubviews in the swapper values, but
+    # the UIColor object is created later (after the content-view guides) —
+    # placeholder now, backfilled where the color is built (6Bn goldens).
+    has_bg = el.find("color[@key='backgroundColor']") is not None
+    if has_bg:
+        cell.add("UIBackgroundColor", N.NIL, None)
+    return cell, subs
+
+
+def _prototype_view_keys(b, cell, el, where, resources, named):
+    """The swapper's view keys from UIDeepDrawRect to UIClipsToBounds, then its
+    background color, backfilled into the placeholder _prototype_shell left."""
+    cell.add("UIDeepDrawRect", *b.boolean(False))
+    mt = _bool_key(el, "multipleTouchEnabled")
+    if mt is not None:
+        cell.add("UIMultipleTouchEnabled", *b.boolean(mt))
+    cell.add("UIAutoresizeSubviews", *b.boolean(False))
+    cell.add("UIAutoresizingMask", *b.int8(_autoresizing_mask(el, where)))
+    cm = el.get("contentMode")
+    if cm is not None and cm != "scaleToFill":
+        cell.add("UIContentMode", *b.int8(CONTENT_MODES[cm]))
+    cell.add("UIClipsToBounds", *b.boolean(el.get("clipsSubviews") != "YES"))
+    bg = el.find("color[@key='backgroundColor']")
+    if bg is not None:
+        col = build_color_el(b, bg, where, resources, named)
+        for i, (k, _v) in enumerate(cell.values):
+            if k == "UIBackgroundColor":
+                cell.values[i] = (k, N.Value(0, N.OBJREF, col.idx))
+
+
+def _prototype_constraints(b, view_el, view, id_map, where, rel_int=None):
+    """A prototype view's own constraints and its layout guide array.
+    Returns (constraint objects, whether the view has a layout guide)."""
+    own = []
+    gid = view_el.find("viewLayoutGuide")
+    cache = []
+    guides = {gid.get("id"): _guide_maker(view, cache)} if gid is not None else {}
+    if view_el.find("constraints") is not None:
+        arr, cons = build_constraints_block(b, view_el, view, id_map, where, guides,
+                                            rel_int=rel_int, cell_const=True)
+        view.add("UIViewAutolayoutConstraints", *b.ref(arr))
+        own = cons
+    if gid is not None:
+        garr = b.new("NSMutableArray")
+        garr.add("NSInlinedValue", *b.boolean(False))
+        garr.add("UINibEncoderEmptyKey", *b.ref(cache[0]))
+        view.add("UIViewLayoutGuides", *b.ref(garr))
+    return own, gid is not None
+
+
+def _prototype_content_view(sb, content, where, resources, named, id_map, state):
+    """A collectionViewCellContentView as a plain UIView.
+    Returns (view, kids, kid constraint groups, own constraints, has guide)."""
+    b = sb.b
+    _check_shape(content, where)
+    (cbx, cby, cbw, cbh), (ccx, ccy) = _bounds_center(content)
+    cv = b.new("UIView")
+    if content.get("id"):
+        id_map[content.get("id")] = cv
+    cv.add("UIBounds", *b.geom(cbx, cby, cbw, cbh))
+    cv.add("UICenter", *b.geom(ccx, ccy))
+    cvsubs = b.new("NSMutableArray")
+    cvsubs.add("NSInlinedValue", *b.boolean(False))
+    cv.add("UISubviews", *b.ref(cvsubs))
+    ckids, cgroups, _ex = _build_kids(sb, content, where, resources, named,
+                                      id_map, state)
+    for k in ckids:
+        cvsubs.add("UINibEncoderEmptyKey", *b.ref(k))
+    cv.add("UIDeepDrawRect", *b.boolean(False))
+    mt = _bool_key(content, "multipleTouchEnabled")
+    if mt is not None:
+        cv.add("UIMultipleTouchEnabled", *b.boolean(mt))
+    cv.add("UIAutoresizeSubviews", *b.boolean(False))
+    cmask = _autoresizing_mask(content, where, default=0)
+    if cmask:
+        cv.add("UIAutoresizingMask", *b.int8(cmask))
+    cm = content.get("contentMode")
+    if cm is not None and cm != "scaleToFill":
+        cv.add("UIContentMode", *b.int8(CONTENT_MODES[cm]))
+    cv.add("UIClipsToBounds", *b.boolean(content.get("clipsSubviews") != "YES"))
+    cv.add("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints",
+          *b.boolean(content.get("translatesAutoresizingMaskIntoConstraints")
+                     == "YES"))
+    own, has_guide = _prototype_constraints(b, content, cv, id_map, where,
+                                            rel_int=N.INT64)
+    if content.get("insetsLayoutMarginsFromSafeArea") is not None:
+        cv.add("UIViewInsetsLayoutMarginsFromSafeArea", *b.int8(0))
+    cv.add("UIViewSemanticContentAttribute", *b.int8(0))
+    cv.add("UIViewLargeContentStoredProperties", N.NIL, None)
+    return cv, ckids, cgroups, own, has_guide
+
+
+def _prototype_pin_constraints(b, cell, cv):
+    """The four system constraints that pin the content view to the cell."""
+    sysarr = b.new("NSMutableArray")
+    sysarr.add("NSInlinedValue", *b.boolean(False))
+    cell.add("UIViewAutolayoutConstraints", *b.ref(sysarr))
+    ident_str = None
+    for attr in ("leading", "trailing", "top", "bottom"):
+        c = b.new("NSLayoutConstraint")
+        c.add("NSFirstItem", *b.ref(cell))
+        c.add("NSFirstAttributeV2", *b.int8(ATTRIBUTES[attr]))
+        c.add("NSFirstAttribute", *b.int8(ATTRIBUTES[attr]))
+        c.add("NSSecondItem", *b.ref(cv))
+        c.add("NSSecondAttributeV2", *b.int8(ATTRIBUTES[attr]))
+        c.add("NSSecondAttribute", *b.int8(ATTRIBUTES[attr]))
+        c.add("NSShouldBeArchived", *b.boolean(False))
+        if ident_str is None:
+            ident_str = b.string("UIIBSystemGenerated")
+        c.add("NSLayoutIdentifier", *b.ref(ident_str))
+        sysarr.add("UINibEncoderEmptyKey", *b.ref(c))
+
+
+def _prototype_cell(sb, el, cell, subs, where, resources, named, id_map, state):
+    """The rest of a collectionViewCell swapper; returns its decode list
+    after the two proxies."""
+    b = sb.b
+    content = el.find("collectionViewCellContentView[@key='contentView']")
+    if content is None:
+        raise XibError(f"<collectionViewCell> has no contentView ({where})")
+    cv, ckids, cgroups, own, has_guide = _prototype_content_view(
+        sb, content, where, resources, named, id_map, state)
+    _prototype_view_keys(b, cell, el, where, resources, named)
+    _prototype_pin_constraints(b, cell, cv)
+    cell.add("UIViewSemanticContentAttribute", *b.int8(0))
+    cell.add("UIViewLargeContentStoredProperties", N.NIL, None)
+    cell.add("UIReuseIdentifier", *b.ref(b.string(_attr(el, "reuseIdentifier", where))))
+    cell.add("UISystemBackgroundView", N.NIL, None)
+    cell.add("UIContentConfigurationView", N.NIL, None)
+    cell.add("UIContentView", *b.ref(cv))
+    cell.add("UIClassName", *b.ref(b.string(_swift_class(el))))
+    cell.add("UIOriginalClassName", *b.ref(b.string("UICollectionViewCell")))
+    subs.add("UINibEncoderEmptyKey", *b.ref(cv))
+    return [cell, cv] + ([lambda bb: _guide_ph(bb)] if has_guide else []) + \
+        own + ckids + [c0 for g in cgroups for c0 in g]
+
+
+def _prototype_reusable(sb, el, cell, subs, where, resources, named, id_map, state):
+    """The rest of a collectionReusableView swapper, which carries its own
+    subviews and constraints; returns its decode list after the two proxies."""
+    b = sb.b
+    kids, groups, _ex = _build_kids(sb, el, where, resources, named, id_map, state)
+    for k in kids:
+        subs.add("UINibEncoderEmptyKey", *b.ref(k))
+    _prototype_view_keys(b, cell, el, where, resources, named)
+    own, has_guide = _prototype_constraints(b, el, cell, id_map, where)
+    cell.add("UIViewSemanticContentAttribute", *b.int8(0))
+    cell.add("UIViewLargeContentStoredProperties", N.NIL, None)
+    cell.add("UIReuseIdentifier", *b.ref(b.string(_attr(el, "reuseIdentifier", where))))
+    cell.add("UIClassName", *b.ref(b.string(_swift_class(el))))
+    cell.add("UIOriginalClassName", *b.ref(b.string("UICollectionReusableView")))
+    return [cell] + ([lambda bb: _guide_ph(bb)] if has_guide else []) + \
+        own + kids + [c0 for g in groups for c0 in g]
+
+
+def _prototype_connections(b, el, cell, id_map, where):
+    """The UINibConnectionsKey array: outlets from the swapper, then control
+    events under it, sorted by selector."""
+    conn_arr = b.new("NSArray")
+    conn_arr.add("NSInlinedValue", *b.boolean(False))
+    for prop, dst in _outlets_of(el, id_map, where):
+        c = b.new("UIRuntimeOutletConnection")
+        c.add("UILabel", *b.ref(b.string(prop)))
+        c.add("UISource", *b.ref(cell))
+        c.add("UIDestination", *b.ref(dst))
+        conn_arr.add("UINibEncoderEmptyKey", *b.ref(c))
+    for sel, mask, dst in _events_under(el, id_map, where):
+        c = b.new("UIRuntimeEventConnection")
+        c.add("UILabel", *b.ref(b.string(sel)))
+        c.add("UISource", *b.ref(id_map[_event_source(el, sel)]))
+        c.add("UIDestination", *b.ref(dst))
+        c.add("UIEventMask", *b.int_fit(mask))
+        conn_arr.add("UINibEncoderEmptyKey", *b.ref(c))
+    return conn_arr
+
+
 def _prototype_archive(el, where, resources, named):
     """[FO, FR, swapper] nib for one prototype. Cells wrap a
     collectionViewCellContentView with four system pin constraints; reusable
@@ -2834,178 +3018,17 @@ def _prototype_archive(el, where, resources, named):
     (_, _, _, _), (cx, cy) = _bounds_center(el)
     if not el.get("customClass"):
         raise XibError(f"<{el.tag}> requires customClass ({where})")
-    cell = b.new("UIClassSwapper")
-    cell.add("UIBounds", *b.geom(0.0, 0.0, w, h))
-    cell.add("UICenter", *b.geom(cx, cy))
-    subs = b.new("NSMutableArray")
-    subs.add("NSInlinedValue", *b.boolean(False))
-    cell.add("UISubviews", *b.ref(subs))
-    # UIBackgroundColor sits right after UISubviews in the swapper values, but
-    # the UIColor object is created later (after the content-view guides) —
-    # placeholder now, backfilled where the color is built (6Bn goldens).
-    has_bg = el.find("color[@key='backgroundColor']") is not None
-    if has_bg:
-        cell.add("UIBackgroundColor", N.NIL, None)
+    cell, subs = _prototype_shell(b, el, w, h, cx, cy)
     id_map = {el.get("id"): cell}
     state = {}
-    decode = []
-    if is_cell:
-        content = el.find("collectionViewCellContentView[@key='contentView']")
-        if content is None:
-            raise XibError(f"<collectionViewCell> has no contentView ({where})")
-        _check_shape(content, where)
-        (cbx, cby, cbw, cbh), (ccx, ccy) = _bounds_center(content)
-        cv = b.new("UIView")
-        if content.get("id"):
-            id_map[content.get("id")] = cv
-        cv.add("UIBounds", *b.geom(cbx, cby, cbw, cbh))
-        cv.add("UICenter", *b.geom(ccx, ccy))
-        cvsubs = b.new("NSMutableArray")
-        cvsubs.add("NSInlinedValue", *b.boolean(False))
-        cv.add("UISubviews", *b.ref(cvsubs))
-        gid = content.find("viewLayoutGuide")
-        cache = []
-        guides = {gid.get("id"): _guide_maker(cv, cache)} if gid is not None else {}
-        ckids, cgroups, _ex = _build_kids(sb, content, where, resources, named,
-                                          id_map, state)
-        for k in ckids:
-            cvsubs.add("UINibEncoderEmptyKey", *b.ref(k))
-        cv.add("UIDeepDrawRect", *b.boolean(False))
-        mt = _bool_key(content, "multipleTouchEnabled")
-        if mt is not None:
-            cv.add("UIMultipleTouchEnabled", *b.boolean(mt))
-        cv.add("UIAutoresizeSubviews", *b.boolean(False))
-        cmask = _autoresizing_mask(content, where, default=0)
-        if cmask:
-            cv.add("UIAutoresizingMask", *b.int8(cmask))
-        cm = content.get("contentMode")
-        if cm is not None and cm != "scaleToFill":
-            cv.add("UIContentMode", *b.int8(CONTENT_MODES[cm]))
-        cv.add("UIClipsToBounds", *b.boolean(content.get("clipsSubviews") != "YES"))
-        cv.add("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints",
-              *b.boolean(content.get("translatesAutoresizingMaskIntoConstraints")
-                         == "YES"))
-        own = []
-        if content.find("constraints") is not None:
-            arr, cons = build_constraints_block(b, content, cv, id_map, where,
-                                                guides, rel_int=N.INT64,
-                                                cell_const=True)
-            cv.add("UIViewAutolayoutConstraints", *b.ref(arr))
-            own = cons
-        if gid is not None:
-            garr = b.new("NSMutableArray")
-            garr.add("NSInlinedValue", *b.boolean(False))
-            garr.add("UINibEncoderEmptyKey", *b.ref(cache[0]))
-            cv.add("UIViewLayoutGuides", *b.ref(garr))
-        if content.get("insetsLayoutMarginsFromSafeArea") is not None:
-            cv.add("UIViewInsetsLayoutMarginsFromSafeArea", *b.int8(0))
-        cv.add("UIViewSemanticContentAttribute", *b.int8(0))
-        cv.add("UIViewLargeContentStoredProperties", N.NIL, None)
-        cell.add("UIDeepDrawRect", *b.boolean(False))
-        mt = _bool_key(el, "multipleTouchEnabled")
-        if mt is not None:
-            cell.add("UIMultipleTouchEnabled", *b.boolean(mt))
-        cell.add("UIAutoresizeSubviews", *b.boolean(False))
-        cell.add("UIAutoresizingMask", *b.int8(_autoresizing_mask(el, where)))
-        cm = el.get("contentMode")
-        if cm is not None and cm != "scaleToFill":
-            cell.add("UIContentMode", *b.int8(CONTENT_MODES[cm]))
-        cell.add("UIClipsToBounds", *b.boolean(el.get("clipsSubviews") != "YES"))
-        bg = el.find("color[@key='backgroundColor']")
-        if bg is not None:
-            col = build_color_el(b, bg, where, resources, named)
-            for i, (k, _v) in enumerate(cell.values):
-                if k == "UIBackgroundColor":
-                    cell.values[i] = (k, N.Value(0, N.OBJREF, col.idx))
-        sysarr = b.new("NSMutableArray")
-        sysarr.add("NSInlinedValue", *b.boolean(False))
-        cell.add("UIViewAutolayoutConstraints", *b.ref(sysarr))
-        ident_str = None
-        for attr in ("leading", "trailing", "top", "bottom"):
-            c = b.new("NSLayoutConstraint")
-            c.add("NSFirstItem", *b.ref(cell))
-            c.add("NSFirstAttributeV2", *b.int8(ATTRIBUTES[attr]))
-            c.add("NSFirstAttribute", *b.int8(ATTRIBUTES[attr]))
-            c.add("NSSecondItem", *b.ref(cv))
-            c.add("NSSecondAttributeV2", *b.int8(ATTRIBUTES[attr]))
-            c.add("NSSecondAttribute", *b.int8(ATTRIBUTES[attr]))
-            c.add("NSShouldBeArchived", *b.boolean(False))
-            if ident_str is None:
-                ident_str = b.string("UIIBSystemGenerated")
-            c.add("NSLayoutIdentifier", *b.ref(ident_str))
-            sysarr.add("UINibEncoderEmptyKey", *b.ref(c))
-        cell.add("UIViewSemanticContentAttribute", *b.int8(0))
-        cell.add("UIViewLargeContentStoredProperties", N.NIL, None)
-        cell.add("UIReuseIdentifier", *b.ref(b.string(_attr(el, "reuseIdentifier", where))))
-        cell.add("UISystemBackgroundView", N.NIL, None)
-        cell.add("UIContentConfigurationView", N.NIL, None)
-        cell.add("UIContentView", *b.ref(cv))
-        cell.add("UIClassName", *b.ref(b.string(_swift_class(el))))
-        cell.add("UIOriginalClassName", *b.ref(b.string("UICollectionViewCell")))
-        subs.add("UINibEncoderEmptyKey", *b.ref(cv))
-        decode = [fo, fr, cell, cv] + ([lambda bb: _guide_ph(bb)] if gid is not None else []) + \
-            own + ckids + [c0 for g in cgroups for c0 in g]
-    else:
-        kids, groups, _ex = _build_kids(sb, el, where, resources, named, id_map, state)
-        for k in kids:
-            subs.add("UINibEncoderEmptyKey", *b.ref(k))
-        cell.add("UIDeepDrawRect", *b.boolean(False))
-        mt = _bool_key(el, "multipleTouchEnabled")
-        if mt is not None:
-            cell.add("UIMultipleTouchEnabled", *b.boolean(mt))
-        cell.add("UIAutoresizeSubviews", *b.boolean(False))
-        cell.add("UIAutoresizingMask", *b.int8(_autoresizing_mask(el, where)))
-        cm = el.get("contentMode")
-        if cm is not None and cm != "scaleToFill":
-            cell.add("UIContentMode", *b.int8(CONTENT_MODES[cm]))
-        cell.add("UIClipsToBounds", *b.boolean(el.get("clipsSubviews") != "YES"))
-        bg = el.find("color[@key='backgroundColor']")
-        if bg is not None:
-            col = build_color_el(b, bg, where, resources, named)
-            for i, (k, _v) in enumerate(cell.values):
-                if k == "UIBackgroundColor":
-                    cell.values[i] = (k, N.Value(0, N.OBJREF, col.idx))
-        own = []
-        gid = el.find("viewLayoutGuide")
-        cache = []
-        guides = {gid.get("id"): _guide_maker(cell, cache)} if gid is not None else {}
-        if el.find("constraints") is not None:
-            arr, cons = build_constraints_block(b, el, cell, id_map, where, guides,
-                                                cell_const=True)
-            cell.add("UIViewAutolayoutConstraints", *b.ref(arr))
-            own = cons
-        if gid is not None:
-            garr = b.new("NSMutableArray")
-            garr.add("NSInlinedValue", *b.boolean(False))
-            garr.add("UINibEncoderEmptyKey", *b.ref(cache[0]))
-            cell.add("UIViewLayoutGuides", *b.ref(garr))
-        cell.add("UIViewSemanticContentAttribute", *b.int8(0))
-        cell.add("UIViewLargeContentStoredProperties", N.NIL, None)
-        cell.add("UIReuseIdentifier", *b.ref(b.string(_attr(el, "reuseIdentifier", where))))
-        cell.add("UIClassName", *b.ref(b.string(_swift_class(el))))
-        cell.add("UIOriginalClassName", *b.ref(b.string("UICollectionReusableView")))
-        decode = [fo, fr, cell] + ([lambda bb: _guide_ph(bb)] if gid is not None else []) + \
-            own + kids + [c0 for g in groups for c0 in g]
+    build = _prototype_cell if is_cell else _prototype_reusable
+    decode = [fo, fr] + build(sb, el, cell, subs, where, resources, named, id_map, state)
     objarr = b.new("NSArray")
     objarr.add("NSInlinedValue", *b.boolean(False))
     for x0 in decode:
         objarr.add("UINibEncoderEmptyKey",
                    *b.ref(x0(b) if callable(x0) else x0))
-    conn_arr = b.new("NSArray")
-    conn_arr.add("NSInlinedValue", *b.boolean(False))
-    for prop, dst in _outlets_of(el, id_map, where):
-        c = b.new("UIRuntimeOutletConnection")
-        c.add("UILabel", *b.ref(b.string(prop)))
-        c.add("UISource", *b.ref(cell))
-        c.add("UIDestination", *b.ref(dst))
-        conn_arr.add("UINibEncoderEmptyKey", *b.ref(c))
-    for sel, mask, dst in _events_under(el, id_map, where):
-        c = b.new("UIRuntimeEventConnection")
-        c.add("UILabel", *b.ref(b.string(sel)))
-        c.add("UISource", *b.ref(id_map[_event_source(el, sel)]))
-        c.add("UIDestination", *b.ref(dst))
-        c.add("UIEventMask", *b.int_fit(mask))
-        conn_arr.add("UINibEncoderEmptyKey", *b.ref(c))
+    conn_arr = _prototype_connections(b, el, cell, id_map, where)
     empty = sb.empty_array()
     top.add("NSInlinedValue", *b.boolean(False))
     for x0 in (fo, fr, cell):
