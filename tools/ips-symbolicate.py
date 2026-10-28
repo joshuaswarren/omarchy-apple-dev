@@ -40,7 +40,7 @@ def parse_thin(data):
     instructions; N_SECT alone does not mean the symbol is a function."""
     if len(data) < 32 or struct.unpack_from("<I", data, 0)[0] != MH_MAGIC_64:
         return None
-    if struct.unpack_from("<i", data, 4)[0] != CPU_ARM64:
+    if struct.unpack_from("<I", data, 4)[0] != CPU_ARM64:
         return None
     ncmds = struct.unpack_from("<I", data, 16)[0]
     uuid = symtab = text_vm = None
