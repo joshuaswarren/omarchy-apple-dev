@@ -28,6 +28,13 @@ python3 -m unittest discover -s tests -p 'test_*.py' || fail=1
 echo "== tools/ibmac.py mac golden (src-mac vs golden-mac)"
 bash tests/ibtool/check-golden.sh || fail=1
 
+echo "== tools/ibtool --self-test (src vs golden and golden-pre17)"
+if python3 tools/ibtool --self-test >"$tmp_selftest" 2>&1; then
+  grep -E "self-test passed" "$tmp_selftest" | sed 's/^/ok   /'
+else
+  echo "FAIL ibtool self-test"; sed 's/^/  /' "$tmp_selftest"; fail=1
+fi
+
 echo "== tests/install-mode.sh"
 bash tests/install-mode.sh || fail=1
 
