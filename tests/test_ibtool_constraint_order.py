@@ -107,6 +107,15 @@ class ConstraintOrder(unittest.TestCase):
         self.assertEqual(order_of(SUBS_MAC, cons, mac=True),
                          ["cAB", "gW", "gT", "cKB", "bA"])
 
+    def test_mac_owner_relation_precedes_attribute(self):
+        cons = """
+    <constraint firstItem="A" firstAttribute="trailing" secondItem="V"
+                secondAttribute="trailing" id="equalTrailing"/>
+    <constraint firstItem="A" firstAttribute="leading" relation="greaterThanOrEqual"
+                secondItem="V" secondAttribute="leading" id="greaterLeading"/>"""
+        self.assertEqual(order_of(SUBS_MAC, cons, mac=True),
+                         ["greaterLeading", "equalTrailing"])
+
     def test_mac_grandchild_depth_fraction(self):
         """A grandchild five levels under A stays in A's group at
         A + 5/10 = A + 0.5, before the next subview B. A depth / 5 fraction

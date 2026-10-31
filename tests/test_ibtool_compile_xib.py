@@ -181,6 +181,15 @@ class CompileXibKeyValuePairs(unittest.TestCase):
         kv = [i for i, _ in enumerate(a.objects)
               if a.object_class(i) == "UINibKeyValuePair"]
         self.assertEqual(len(kv), 1)
+        root = {a.key(v.key_idx): v for v in a.object_values(a.objects[0])}
+        pairs_ref = root["UINibKeyValuePairsKey"]
+        self.assertEqual(pairs_ref.type, nibarchive.OBJREF)
+        self.assertEqual(a.object_class(pairs_ref.payload), "NSArray")
+        pairs = a.object_values(a.objects[pairs_ref.payload])
+        self.assertEqual(
+            [(a.key(v.key_idx), v.type, v.payload) for v in pairs],
+            [("NSInlinedValue", nibarchive.FALSE, False),
+             ("UINibEncoderEmptyKey", nibarchive.OBJREF, kv[0])])
         obj = a.objects[kv[0]]
         vals = {a.key(v.key_idx): v for v in a.object_values(obj)}
         self.assertTrue(a.render(vals["UIKeyPath"]).startswith("string 'isHidden'"))
