@@ -12,6 +12,10 @@
 ### weaklink writes the real weak load command
 
 - `flutter/tools/weaklink.py` flipped LC_LOAD_DYLIB to LC_LOAD_WEAK_DYLIB by writing cmd `0x18` — without the `LC_REQ_DYLD` bit the value is not a load command at all, and App Store upload rejected such an ipa with ITMS-91032 ("Invalid executable ... contains an invalid load command"). The command is `0x80000018`; the flip now writes that, touches nothing but the cmd field, and a second run is a no-op. Also verified on a real sentry-cocoa 9.x link: no chained-fixups import binds to SwiftUICore (the framework arrives by autolink alone), so the weak command leaves no strong imports behind and matches the shape Xcode-16-built apps ship.
+- The weak-link tool now finishes parsing all selected slices before writing
+  any load command. A later parse error returns nonzero and leaves the input
+  bytes unchanged. Real CLI tests cover a truncated later command, the valid
+  command-only rewrite and a second run with no changes.
 
 ### Flutter builds carry the app extensions the Runner embeds
 

@@ -69,11 +69,12 @@ def rewrite(path, frameworks):
                     name = data[p + off:end].decode('utf-8', 'replace')
                     parent = name.rsplit('/', 2)[-2] if '/' in name else ''
                     if parent in wants:
-                        fh.seek(p)
-                        fh.write(struct.pack('<I', LC_LOAD_WEAK_DYLIB))
-                        changed.append(name)
+                        changed.append((p, name))
                 p += cmdsize
-    return changed
+        for offset, _ in changed:
+            fh.seek(offset)
+            fh.write(struct.pack('<I', LC_LOAD_WEAK_DYLIB))
+    return [name for _, name in changed]
 
 
 def main():
@@ -83,7 +84,7 @@ def main():
     path, frameworks = sys.argv[1], sys.argv[2:]
     try:
         changed = rewrite(path, frameworks)
-    except OSError as e:
+    except (OSError, ValueError, struct.error) as e:
         print(f'weaklink: {path}: {e}', file=sys.stderr)
         return 1
     for name in changed:
