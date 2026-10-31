@@ -115,6 +115,12 @@ The menu command checks both binary hashes again before launch. It preserves
 your HOME and XDG directories, and uses the PATH from registration.
 Keep this checkout in place; register again if you move it.
 
+Registration writes each file through an exclusive temporary file in the same
+directory. It sets permissions before publication and uses atomic replacement.
+If publication stops between config and menu updates, rerun `enable` or use
+`disable`. Both commands retain ownership of the previous menu entry until
+the update completes. Unrelated or edited entries still stop the operation.
+
 Use Tomacco's ordinary xtool project workflow with the existing toolchain and
 sign-in. Existing explicit Tomacco executable settings still take precedence.
 Do not use `ios.toolkit_install`: that separate upstream adapter creates a

@@ -16,6 +16,16 @@
   registration PATH. Tomacco's private toolkit, Flutter and store adapters
   are not integrated. Desktop rendering and end-to-end frontend use remain
   untested.
+- Registration now publishes exclusive same-directory temporary files with
+  permissions set before atomic replacement. A partial-write fault preserves
+  the prior file. Interrupted config/menu publication retains the previous
+  owned entry until completion; rerun and removal remain usable.
+- Desktop commands now escape both the desktop string and Exec argument
+  layers. Real GIO tests cover arguments and executable-script paths containing
+  trailing or repeated backslashes, quotes, dollars and percent field codes.
+  An isolated executable fixture checks launch routing, process replacement,
+  exit status and unchanged HOME/XDG with the registered PATH. This is not a
+  Tomacco UI or Apple/device qualification.
 
 ### asc.py states its cryptography requirement
 

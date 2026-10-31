@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 REVISION = "84f877eb34fb202384010afb5f54c0da7fea892f"
@@ -23,6 +24,22 @@ def locations():
 
 def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def atomic_write(path, text, mode):
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
+                                         prefix=f".{path.name}.", delete=False) as stream:
+            temporary = Path(stream.name)
+            os.fchmod(stream.fileno(), mode)
+            stream.write(text)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def validate(directory):
@@ -44,7 +61,9 @@ def registration():
     if (not isinstance(value, dict) or value.get("release") != REVISION
             or not isinstance(value.get("directory"), str)
             or not isinstance(value.get("desktop_sha256"), str)
-            or not isinstance(value.get("path"), str)):
+            or not isinstance(value.get("path"), str)
+            or value.get("previous_desktop_sha256") is not None
+            and not isinstance(value["previous_desktop_sha256"], str)):
         raise ValueError(f"Registration is not owned by this frontend: {state}")
     return value
 
@@ -52,17 +71,19 @@ def registration():
 def check_desktop(value):
     _, desktop = locations()
     if desktop.is_symlink() or (desktop.exists() and
-            (value is None or digest(desktop) != value["desktop_sha256"])):
+            (value is None or digest(desktop) not in
+             (value["desktop_sha256"], value.get("previous_desktop_sha256")))):
         raise ValueError(f"Desktop entry is not owned or has changed; preserving {desktop}")
 
 
 def desktop_argument(value):
+    """Desktop files decode string escapes before parsing Exec arguments."""
     value = str(value).replace("%", "%%")
     for character in ("\\", '"', "`", "$"):
         value = value.replace(character, "\\" + character)
     if "\n" in value or "\r" in value:
         raise ValueError("Desktop command paths must not contain newlines")
-    return '"' + value + '"'
+    return ('"' + value + '"').replace("\\", "\\\\")
 
 
 def enable(directory):
@@ -74,12 +95,15 @@ def enable(directory):
     entry = ("[Desktop Entry]\nType=Application\nName=iOS development (Tomacco)\n"
              f"Exec={command}\nTerminal=false\nCategories=Development;\n")
     value = {"release": REVISION, "directory": str(directory), "path": os.environ.get("PATH", ""),
-             "desktop_sha256": hashlib.sha256(entry.encode()).hexdigest()}
+             "desktop_sha256": hashlib.sha256(entry.encode()).hexdigest(),
+             "previous_desktop_sha256": digest(desktop) if desktop.exists() else None}
     state.parent.mkdir(parents=True, exist_ok=True)
     desktop.parent.mkdir(parents=True, exist_ok=True)
-    state.write_text(json.dumps(value, indent=2) + "\n")
-    state.chmod(0o600)
-    desktop.write_text(entry)
+    atomic_write(state, json.dumps(value, indent=2) + "\n", 0o600)
+    atomic_write(desktop, entry, 0o644)
+    if value["previous_desktop_sha256"] is not None:
+        value["previous_desktop_sha256"] = None
+        atomic_write(state, json.dumps(value, indent=2) + "\n", 0o600)
     return {"enabled": True, "release": REVISION, "desktop": str(desktop)}
 
 
