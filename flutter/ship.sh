@@ -81,6 +81,15 @@ echo "== 2. SwiftPM dylibs as frameworks =="
 "$PY" "$ASC" frameworks "$bundle"
 
 echo "== 3. Distribution identity and signature =="
+# The signature's capability entitlements (Sign in with Apple, aps-environment,
+# Associated Domains) come only from ASC_ENTITLEMENTS_PATH, never from the
+# provisioning profile; the auto-detection above is the only fallback. Reaching
+# the identity step without the variable means an entitlement-less signature
+# that installs and validates fine and fails only in the field (a dead Sign in
+# with Apple button, no APNs token, dead Associated Domains).
+if [ -z "${ASC_ENTITLEMENTS_PATH:-}" ]; then
+  echo "warning: ASC_ENTITLEMENTS_PATH is not set (no CODE_SIGN_ENTITLEMENTS was detected for the built configuration): signing WITHOUT the Sign in with Apple, push (aps-environment) and Associated Domains entitlements — asc.py takes capability entitlements only from that file, never from the provisioning profile" >&2
+fi
 sign_dir=$out/ship-signing
 if [ -n "${ASC_PROFILE:-}" ]; then
   "$PY" "$ASC" given-identity "$bundle" "$sign_dir"
