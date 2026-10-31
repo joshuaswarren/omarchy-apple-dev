@@ -100,6 +100,84 @@ m.enable(root)
             self.assertEqual(desktop.read_bytes(), old_entry)
             self.assertTrue(state.exists())
 
+    def test_final_state_failure_rejects_a_user_restored_old_entry(self):
+        import errno
+        from unittest.mock import patch
+        for action in ("enable", "disable"):
+            with self.subTest(action=action):
+                fixture = lifecycle.TomaccoFrontendTest()
+                fixture.setUp()
+                self.addCleanup(fixture.doCleanups)
+                module = fixture.module()
+                root, pins = fixture.release(module)
+                moved = fixture.home / "moved-tool.py"
+                moved.write_bytes(TOOL.read_bytes())
+                with patch.dict(os.environ, fixture.env), pins:
+                    module.enable(root)
+                    state, desktop = module.locations()
+                    old_entry = desktop.read_bytes()
+                    replace = os.replace
+                    state_publications = 0
+                    final_write_failed = False
+
+                    def fail_final_state(source, target, state=state, replace=replace):
+                        nonlocal state_publications, final_write_failed
+                        if Path(target) == state:
+                            state_publications += 1
+                            if state_publications == 2:
+                                final_write_failed = True
+                                raise OSError(errno.ENOSPC, "final state publication failed")
+                        return replace(source, target)
+
+                    with patch.object(module, "__file__", str(moved)):
+                        with patch.object(os, "replace", side_effect=fail_final_state):
+                            try:
+                                module.enable(root)
+                            except OSError as error:
+                                self.assertEqual(error.errno, errno.ENOSPC)
+                        self.assertNotEqual(desktop.read_bytes(), old_entry)
+                        desktop.write_bytes(old_entry)
+                        with self.assertRaisesRegex(
+                                ValueError, "changed",
+                                msg=f"final_write_failed={final_write_failed}; writes={state_publications}"):
+                            module.enable(root) if action == "enable" else module.disable()
+                        self.assertEqual(desktop.read_bytes(), old_entry)
+                        self.assertTrue(state.exists())
+
+    def test_recovery_rejects_rewritten_original_inode_with_old_bytes_and_mtime(self):
+        import errno
+        from unittest.mock import patch
+        fixture = lifecycle.TomaccoFrontendTest()
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        module = fixture.module()
+        root, pins = fixture.release(module)
+        moved = fixture.home / "moved-tool.py"
+        moved.write_bytes(TOOL.read_bytes())
+        with patch.dict(os.environ, fixture.env), pins:
+            module.enable(root)
+            _, desktop = module.locations()
+            original = desktop.stat()
+            old_entry = desktop.read_bytes()
+            replace = os.replace
+
+            def fail_desktop(source, target):
+                if Path(target) == desktop:
+                    raise OSError(errno.ENOSPC, "desktop publication failed")
+                return replace(source, target)
+
+            with patch.object(module, "__file__", str(moved)):
+                with patch.object(os, "replace", side_effect=fail_desktop), self.assertRaises(OSError):
+                    module.enable(root)
+                desktop.write_bytes(old_entry)
+                os.utime(desktop, ns=(original.st_atime_ns, original.st_mtime_ns))
+                self.assertEqual(desktop.stat().st_ino, original.st_ino)
+                self.assertEqual(desktop.stat().st_mtime_ns, original.st_mtime_ns)
+                self.assertNotEqual(desktop.stat().st_ctime_ns, original.st_ctime_ns)
+                with self.assertRaisesRegex(ValueError, "changed"):
+                    module.disable()
+                self.assertEqual(desktop.read_bytes(), old_entry)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -118,8 +118,9 @@ Keep this checkout in place; register again if you move it.
 Registration writes each file through an exclusive temporary file in the same
 directory. It sets permissions before publication and uses atomic replacement.
 If publication stops between config and menu updates, rerun `enable` or use
-`disable`. Both commands retain ownership of the previous menu entry until
-the update completes. Unrelated or edited entries still stop the operation.
+`disable`. Recovery accepts the original menu file only while its identity,
+timestamps, size and hash remain unchanged. Restoring old bytes after replacement
+does not restore ownership. Unrelated or edited entries stop the operation.
 
 Use Tomacco's ordinary xtool project workflow with the existing toolchain and
 sign-in. Existing explicit Tomacco executable settings still take precedence.

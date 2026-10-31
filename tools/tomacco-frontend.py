@@ -26,6 +26,12 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def desktop_identity(path):
+    info = path.stat()
+    return {"device": info.st_dev, "inode": info.st_ino, "size": info.st_size,
+            "mtime_ns": info.st_mtime_ns, "ctime_ns": info.st_ctime_ns, "sha256": digest(path)}
+
+
 def atomic_write(path, text, mode):
     temporary = None
     try:
@@ -62,18 +68,21 @@ def registration():
             or not isinstance(value.get("directory"), str)
             or not isinstance(value.get("desktop_sha256"), str)
             or not isinstance(value.get("path"), str)
-            or value.get("previous_desktop_sha256") is not None
-            and not isinstance(value["previous_desktop_sha256"], str)):
+            or (value.get("previous_desktop_file") is not None
+                and not isinstance(value["previous_desktop_file"], dict))):
         raise ValueError(f"Registration is not owned by this frontend: {state}")
     return value
 
 
 def check_desktop(value):
     _, desktop = locations()
-    if desktop.is_symlink() or (desktop.exists() and
-            (value is None or digest(desktop) not in
-             (value["desktop_sha256"], value.get("previous_desktop_sha256")))):
+    linked = desktop.is_symlink()
+    identity = desktop_identity(desktop) if not linked and desktop.exists() else None
+    if linked or (identity is not None and
+                  (value is None or (identity["sha256"] != value["desktop_sha256"]
+                                     and identity != value.get("previous_desktop_file")))):
         raise ValueError(f"Desktop entry is not owned or has changed; preserving {desktop}")
+    return identity
 
 
 def desktop_argument(value):
@@ -89,21 +98,18 @@ def desktop_argument(value):
 def enable(directory):
     directory = validate(directory)
     current = registration()
-    check_desktop(current)
+    previous_desktop = check_desktop(current)
     state, desktop = locations()
     command = " ".join(desktop_argument(p) for p in (sys.executable, Path(__file__).resolve(), "launch"))
     entry = ("[Desktop Entry]\nType=Application\nName=iOS development (Tomacco)\n"
              f"Exec={command}\nTerminal=false\nCategories=Development;\n")
     value = {"release": REVISION, "directory": str(directory), "path": os.environ.get("PATH", ""),
              "desktop_sha256": hashlib.sha256(entry.encode()).hexdigest(),
-             "previous_desktop_sha256": digest(desktop) if desktop.exists() else None}
+             "previous_desktop_file": previous_desktop}
     state.parent.mkdir(parents=True, exist_ok=True)
     desktop.parent.mkdir(parents=True, exist_ok=True)
     atomic_write(state, json.dumps(value, indent=2) + "\n", 0o600)
     atomic_write(desktop, entry, 0o644)
-    if value["previous_desktop_sha256"] is not None:
-        value["previous_desktop_sha256"] = None
-        atomic_write(state, json.dumps(value, indent=2) + "\n", 0o600)
     return {"enabled": True, "release": REVISION, "desktop": str(desktop)}
 
 

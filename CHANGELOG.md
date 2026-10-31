@@ -18,8 +18,9 @@
   untested.
 - Registration now publishes exclusive same-directory temporary files with
   permissions set before atomic replacement. A partial-write fault preserves
-  the prior file. Interrupted config/menu publication retains the previous
-  owned entry until completion; rerun and removal remain usable.
+  the prior file. Interrupted config/menu publication records the original
+  menu file's identity, timestamps, size and hash for recovery. A restored or
+  rewritten old entry is preserved. No final config rewrite revokes ownership.
 - Desktop commands now escape both the desktop string and Exec argument
   layers. Real GIO tests cover arguments and executable-script paths containing
   trailing or repeated backslashes, quotes, dollars and percent field codes.
