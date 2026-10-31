@@ -77,15 +77,14 @@ class MainEntry(unittest.TestCase):
         rc, out, err = run_cli("--module")
         self.assertEqual((rc, out, err), (2, "", NO_ACTION))
 
-    def test_module_lookup_ignores_final_arg(self):
-        """--module is looked up on argv[:-1]: a trailing --module must not
-        break the compile (an argv lookup would IndexError)."""
-        with tempfile.TemporaryDirectory() as tmp:
-            outdir = os.path.join(tmp, "out")
-            rc, stdout, err = run_cli(*FLAGS, "--compilation-directory", outdir,
-                                      str(SB), "--module")
-            self.assertEqual(rc, 0, err)
-            self.assertEqual(err, f"/* {outdir}/LaunchScreenPhone.storyboardc */\n")
+    def test_value_lookup_ignores_final_arg(self):
+        for flag in ("--module", "--minimum-deployment-target"):
+            with self.subTest(flag=flag), tempfile.TemporaryDirectory() as tmp:
+                outdir = os.path.join(tmp, "out")
+                rc, stdout, err = run_cli("--compilation-directory", outdir,
+                                          str(SB), flag)
+                self.assertEqual((rc, stdout, err),
+                                 (0, "", f"/* {outdir}/LaunchScreenPhone.storyboardc */\n"))
 
     def test_no_action(self):
         rc, out, err = run_cli("--errors")
@@ -127,6 +126,21 @@ class MainEntry(unittest.TestCase):
             self.assertEqual((rc, stdout, err), (0, "", ""))
             self.assertTrue(os.path.exists(out))
             self.assertFalse(os.path.exists(out + ".tmp-nibarchive"))
+
+    def test_module_override_reaches_compiled_class(self):
+        import nibarchive
+
+        src = SRC / "NetNewsWire" / "SettingsTableViewCell.xib"
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp, "cell.nib")
+            rc, stdout, err = run_cli(*FLAGS, "--module", "Override",
+                                      "--compile", str(out), str(src))
+            self.assertEqual((rc, stdout, err), (0, "", ""))
+            a = nibarchive.load(out)
+            classes = [a.object_string(v.payload)
+                       for obj in a.objects for v in a.object_values(obj)
+                       if a.key(v.key_idx) == "UIClassName"]
+            self.assertEqual(classes, ["_TtC8Override20VibrantTableViewCell"])
 
     def test_compile_xib_parse_error(self):
         with tempfile.TemporaryDirectory() as tmp:
