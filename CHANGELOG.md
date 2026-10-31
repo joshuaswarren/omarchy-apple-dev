@@ -2,6 +2,21 @@
 
 ## v0.4.3
 
+### Optional registration for a separately installed Tomacco frontend
+
+- `tools/tomacco-frontend.py` adds explicit `enable`, `status`, `launch`, and
+  `disable` commands for the evaluated Tomacco 1.0.0 x86_64 binaries. It checks
+  both binary hashes at registration and before launch. It downloads and
+  installs nothing, does not launch during registration, and leaves both
+  existing toolchain install modes unchanged.
+- Registration adds an application-menu entry and records its own file hash.
+  Removal keeps the separate application, data, toolchain, SDKs and credentials.
+  A changed or symlinked desktop entry is preserved.
+- The supported upstream xtool project route retains the normal HOME and
+  registration PATH. Tomacco's private toolkit, Flutter and store adapters
+  are not integrated. Desktop rendering and end-to-end frontend use remain
+  untested.
+
 ### asc.py states its cryptography requirement
 
 - `tools/asc.py` needs `cryptography` 42 or later: `certificate()` and `make_test_profile()` read `Certificate.not_valid_after_utc`, which cryptography added in 42.0.0. On an older module a command would fail with an `AttributeError` in the middle of its work. Run as `identity` or `test-identity` (the only commands that reach those two functions), `asc.py` now checks the version first and stops with `asc.py: needs cryptography 42 or later (Certificate.not_valid_after_utc); this python has 41.0.7. Upgrade it: <python> -m pip install -U cryptography`. The check is in the command-line block and covers those two commands only, so `validate`, `stamp`, `frameworks`, `given-identity` and `upload`, `provision-dev.py`, `provision-mac.py` and the tests that import `asc` as a module behave as before on an older module.

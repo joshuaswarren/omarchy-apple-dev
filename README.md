@@ -93,6 +93,47 @@ installer after toolchain changes: it checks the SDK stamp, not just that name.
   `./install-toolchain.sh --repair`. See
   [GETTING-STARTED.md](GETTING-STARTED.md), *Toolchain swaps*.
 
+### Optional Tomacco frontend
+
+Tomacco is a separate application. This repository does not download, bundle,
+install, or start it. The optional registration accepts the evaluated
+Tomacco 1.0.0 x86_64 binaries from source commit
+`84f877eb34fb202384010afb5f54c0da7fea892f`; other builds fail the hash check.
+Keep its dependencies, license notices, and corresponding source available
+under its own installation procedure.
+
+After installing that version separately, run these commands from this checkout:
+
+```sh
+python3 tools/tomacco-frontend.py enable "$HOME/.local/lib/tomacco"
+python3 tools/tomacco-frontend.py status
+```
+
+This adds **iOS development (Tomacco)** to the application menu. It does not
+change **Install > Development > iOS** or either toolchain install mode.
+The menu command checks both binary hashes again before launch. It preserves
+your HOME and XDG directories, and uses the PATH from registration.
+Keep this checkout in place; register again if you move it.
+
+Use Tomacco's ordinary xtool project workflow with the existing toolchain and
+sign-in. Existing explicit Tomacco executable settings still take precedence.
+Do not use `ios.toolkit_install`: that separate upstream adapter creates a
+private toolkit and HOME. Its Flutter, Xcode-import and store adapters are
+not connected to this registration. No device, SDK build, sign-in, or desktop
+rendering has been qualified by the registration tests.
+
+To remove only this registration:
+
+```sh
+python3 tools/tomacco-frontend.py disable
+```
+
+Removal preserves Tomacco, its data, the toolchain, SDKs, and credentials.
+It refuses to overwrite or remove a desktop entry you changed.
+This option supplies no Apple SDK, firmware, emulator, or Apple-terms acceptance.
+Optional registration does not establish permission to use or distribute
+Apple materials. No emulator-engine distribution is approved here.
+
 ## First app
 
 ```
