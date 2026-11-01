@@ -30,6 +30,14 @@ export XCODE_VERSION=${XCODE_VERSION:-27.0} XCODE_BUILD=${XCODE_BUILD:-27A266a}
 "$PY" "$ASC" stamp "$BUNDLE" "${BUILD_NUMBER:-$(date -u +%Y%m%d%H%M)}"
 
 echo "== 2. Distribution identity and signature =="
+# Capability entitlements (Sign in with Apple, aps-environment, Associated
+# Domains) come only from ASC_ENTITLEMENTS_PATH, never from the provisioning
+# profile: without it the ipa signs entitlement-less, installs and validates
+# fine, and fails only in the field (a dead Sign in with Apple button, no APNs
+# token, dead Associated Domains).
+if [ -z "${ASC_ENTITLEMENTS_PATH:-}" ]; then
+  echo "warning: ASC_ENTITLEMENTS_PATH is not set: signing WITHOUT the Sign in with Apple, push (aps-environment) and Associated Domains entitlements — asc.py takes capability entitlements only from that file, never from the provisioning profile" >&2
+fi
 sign_dir=$OUT/ship-signing
 if [ -n "${ASC_KEY_ID:-}" ]; then
   "$PY" "$ASC" identity "$BUNDLE" "$sign_dir"
