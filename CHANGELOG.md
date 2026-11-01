@@ -2,6 +2,14 @@
 
 ## v0.4.3
 
+### xtool password login uses the provider user-agent
+
+- The installer pins the six-file correction from xtool-org/xtool#406 while
+  preserving the existing packaging and build-server fixes. GrandSlam requests
+  use the user-agent returned with the anisette provider's client information.
+- The SDK version stamp stays unchanged. This pin change does not sign in,
+  install an app, or change stored credentials.
+
 ### Optional registration for a separately installed Tomacco frontend
 
 - `tools/tomacco-frontend.py` adds explicit `enable`, `status`, `launch`, and
