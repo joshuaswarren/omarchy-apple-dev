@@ -6,3 +6,4 @@ simview-demo-neg
 m3app
 nestedapp
 overlapapp
+*.pyc
