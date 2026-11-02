@@ -297,3 +297,7 @@ Lightning to `joshuaswarren@strike.me`.
 ## License
 
 MIT
+
+## Contributors
+
+Everyone credited so far: [CONTRIBUTORS.md](CONTRIBUTORS.md).
