@@ -57,7 +57,8 @@ class CollectAuthorsTests(unittest.TestCase):
             {"login": "cursoragent"},
         ]
         pr_authors = ["somebot[bot]", "REALHUMAN", "excludedperson"]
-        out = uc.collect_authors(contributors, pr_authors, "joshuaswarren", {"excludedperson"})
+        out = uc.collect_authors(contributors, pr_authors, "joshuaswarren",
+                                 {"excludedperson", "cursoragent"})
         self.assertEqual(out, ["realhuman"])
 
     def test_bot_suffix_case_insensitive(self):
@@ -248,13 +249,46 @@ class EnvModeTests(unittest.TestCase):
         with open(target, encoding="utf-8") as fh:
             self.assertEqual(fh.read(), "body")
 
-    def test_emit_devnull_writes_nothing(self):
+    def test_emit_without_destination_writes_nothing(self):
         import contextlib
         import io
         buffer = io.StringIO()
         with contextlib.redirect_stdout(buffer):
-            rc = uc._emit("body", False, os.devnull)
+            rc = uc._emit("body", False, None)
         self.assertEqual((rc, "CHANGED=false" in buffer.getvalue()), (0, True))
+
+    def test_failed_write_leaves_original_intact(self):
+        target = os.path.join(tempfile.mkdtemp(), "CONTRIBUTORS.md")
+        original = "donor bytes \r\n- [@keep](https://github.com/keep)\r\n"
+        with open(target, "w", encoding="utf-8", newline="") as fh:
+            fh.write(original)
+        import contextlib, io
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            try:
+                uc._emit("replacement", True, os.path.join(target, "not-a-dir"))
+            except (OSError, NotADirectoryError):
+                pass
+            else:
+                self.fail("expected the failed write to raise")
+        with open(target, "r", encoding="utf-8", newline="") as fh:
+            self.assertEqual(fh.read(), original)
+
+    def test_crlf_donor_bytes_survive_regen(self):
+        donor_file = (
+            "# Contributors\r\n\r\n"
+            "## Hardware donors\r\n\r\n"
+            "- Alice Mac (donated an M1)\r\n\r\n"
+            + BEGIN + "\r\nold-crlf\r\n" + END + "\r\n"
+        )
+        registry = uc.render_registry(["alice"])
+        new_text, changed = uc.update_contributors_md(donor_file, registry)
+        self.assertTrue(changed)
+        head = new_text.partition(BEGIN)[0]
+        tail = new_text.rpartition(END)[2]
+        self.assertEqual(head, "# Contributors\r\n\r\n## Hardware donors\r\n\r\n- Alice Mac (donated an M1)\r\n\r\n")
+        self.assertEqual(tail, "\r\n")
+        self.assertNotIn("old-crlf", new_text)
 
 
 class RefinementTests(unittest.TestCase):
@@ -383,11 +417,31 @@ class BotTypeTests(unittest.TestCase):
         out = uc.collect_authors([{"login": "someapp[bot]"}], [], "o", set())
         self.assertEqual(out, [])
 
-    def test_registry_states_anonymous_boundary(self):
+    def test_registry_states_anonymous_boundary_truthfully(self):
         registry = uc.render_registry(["alice"])
-        self.assertIn("Anonymous (email-only)", registry)
+        self.assertIn("enumerable through the API (anon=true)", registry)
+        self.assertIn("does not publish", registry)
+
+    def test_real_human_named_claude_not_excluded(self):
+        # users/claude is a real person (type User); only actual bot
+        # identities (API type or documented [bot] suffix) are excluded.
+        out = uc.collect_authors([{"login": "claude", "type": "User"}], [], "o", set())
+        self.assertEqual(out, ["claude"])
+
+    def test_agent_account_with_user_type_excluded_only_when_configured(self):
+        # agent accounts without bot markers are excluded via per-repo
+        # EXTRA_EXCLUDE policy, never by guessing from names.
+        out = uc.collect_authors([{"login": "cursoragent", "type": "User"}], [], "o", set())
+        self.assertEqual(out, ["cursoragent"])
+        out = uc.collect_authors([{"login": "cursoragent", "type": "User"}], [], "o", {"cursoragent"})
+        self.assertEqual(out, [])
 
 
 
 if __name__ == "__main__":
     unittest.main()
+
+class MalformedLinkTests(unittest.TestCase):
+    def test_malformed_next_segment_returns_none(self):
+        self.assertIsNone(uc._next_link('<https://x?page=2; rel="next"'))
+        self.assertIsNone(uc._next_link('https://x?page=2> ; rel="next"'))

@@ -23,14 +23,17 @@ BEGIN_MARKER = (
 )
 END_MARKER = "<!-- END GENERATED CONTRIBUTORS -->"
 DEFAULT_EXCLUDE = {
-    "web-flow",    # GitHub's own web-flow commit identity
-    "cursoragent", # Cursor's coding-agent account; commits credit the human driver
-    "copilot",     # GitHub Copilot coding-agent account
-    "claude",      # Anthropic's agent account
+    "web-flow",  # GitHub's own web-flow commit identity
 }
 BOT_SUFFIX = "[bot]"
 FILE_TITLE = "# Contributors"
 EMPTY_REGISTRY_LINE = "_No outside contributor accounts recorded yet._"
+ANON_NOTE = (
+    "_Linked GitHub accounts only. Anonymous (unlinked) commit authors are\n"
+    "enumerable through the API (anon=true) but are identified there only by\n"
+    "name/email, which this registry does not publish; credit them by hand in\n"
+    "the sections above where known._"
+)
 
 
 class ApiError(RuntimeError):
@@ -104,18 +107,14 @@ def collect_authors(contributors, pr_authors, owner, extra_exclude=()):
 def render_registry(entries):
     lines = ["- [@%s](https://github.com/%s)" % (name, name) for name in entries]
     body = "\n".join(lines) if lines else EMPTY_REGISTRY_LINE
-    note = (
-        "\n_Listed are GitHub accounts only. Anonymous (email-only) commit authors\n"
-        "cannot be enumerated through the GitHub API and are credited by hand in\n"
-        "the sections above where known._"
-    )
-    return "%s\n\n%s\n%s\n\n%s" % (BEGIN_MARKER, body, note, END_MARKER)
+    return "%s\n\n%s\n%s\n\n%s" % (BEGIN_MARKER, body, ANON_NOTE, END_MARKER)
 
 
 def update_contributors_md(existing, registry):
     """Return (new_text, changed). With no markers in an existing file the
     file is hand-managed and left untouched. Never rewrites donor/manual
-    text outside the markers."""
+    text outside the markers. Reads and writes with newline='' so CRLF
+    donor bytes survive round-trips untouched."""
     if existing is None:
         return "%s\n\n%s\n\n" % (FILE_TITLE, registry), True
     if BEGIN_MARKER not in existing and END_MARKER not in existing:
@@ -128,6 +127,26 @@ def update_contributors_md(existing, registry):
         raise ValueError("END marker precedes BEGIN marker")
     new_text = existing[:begin_at] + registry + existing[end_at + len(END_MARKER):]
     return new_text, new_text != existing
+
+
+def _write_atomic(path, text):
+    """Replace path's content only after the full new content is on disk in
+    the same directory; a failed write never truncates the original."""
+    import tempfile
+    directory = os.path.dirname(os.path.abspath(path))
+    handle = tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", newline="", dir=directory, delete=False
+    )
+    try:
+        with handle:
+            handle.write(text)
+        os.replace(handle.name, path)
+    except BaseException:
+        try:
+            os.unlink(handle.name)
+        except OSError:
+            pass
+        raise
 
 
 def _next_link(header_value):
@@ -176,7 +195,7 @@ def _env_settings():
 def _load_existing(path):
     if not os.path.exists(path):
         return None
-    with open(path, encoding="utf-8") as handle:
+    with open(path, encoding="utf-8", newline="") as handle:
         return handle.read()
 
 
@@ -210,8 +229,7 @@ def _token_get_json(url):
 
 def _emit(new_text, changed, destination):
     if destination is not None:
-        with open(destination, "w", encoding="utf-8") as handle:
-            handle.write(new_text)
+        _write_atomic(destination, new_text)
     print("CHANGED=%s" % str(changed).lower())
     return 0
 

@@ -24,6 +24,10 @@ concurrency:
 jobs:
   upkeep:
     runs-on: ubuntu-latest
+    env:
+      # One exclusion policy shared by regeneration and the --check pass so
+      # the check can never validate under a different policy than wrote.
+      EXTRA_EXCLUDE: ''
     steps:
       # Always regenerate against the default branch, even when a maintainer
       # picks another ref in workflow_dispatch (a dispatch against a feature
@@ -39,7 +43,6 @@ jobs:
         id: regen
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          EXTRA_EXCLUDE: ''
         run: |
           python3 .github/scripts/update_contributors.py | tee regen.log
           if grep -qx 'CHANGED=true' regen.log; then
