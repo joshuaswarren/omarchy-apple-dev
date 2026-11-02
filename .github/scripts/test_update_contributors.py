@@ -362,7 +362,15 @@ class GhostIdentityTests(unittest.TestCase):
             {"user": {"login": "rejected"}, "merged_at": None},
             {"user": {"login": "accepted"}, "merged_at": "2026-01-01T00:00:00Z"},
         ]
-        self.assertEqual(uc._pr_author_logins(pulls), ["accepted"])
+        self.assertEqual(uc._pr_author_logins(pulls), [{"login": "accepted"}])
+
+    def test_merged_pr_bot_author_excluded_via_type_field(self):
+        pulls = [
+            {"user": {"login": "PureBot", "type": "Bot"}, "merged_at": "2026-01-01T00:00:00Z"},
+            {"user": {"login": "humanperson"}, "merged_at": "2026-01-02T00:00:00Z"},
+        ]
+        out = uc.collect_authors([], uc._pr_author_logins(pulls), "o", set())
+        self.assertEqual(out, ["humanperson"])
 
 
 class BotTypeTests(unittest.TestCase):

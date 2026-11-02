@@ -181,17 +181,17 @@ def _load_existing(path):
 
 
 def _pr_author_logins(pulls):
-    """PR objects carry the author under user.login. Only MERGED pull
-    requests count; rejected/closed-unmerged authors are not contributors.
-    Ghosted users are skipped."""
-    logins = []
+    """Author dicts (login + type preserved for bot detection) of MERGED
+    pull requests only; rejected/closed-unmerged authors are not
+    contributors. Ghosted users are skipped."""
+    authors = []
     for pull in pulls:
         if not isinstance(pull, dict) or not pull.get("merged_at"):
             continue
         user = pull.get("user")
         if isinstance(user, dict) and user.get("login"):
-            logins.append(user["login"])
-    return logins
+            authors.append(user)
+    return authors
 
 
 def _registry_from_api(get_json, owner, repo, extra_exclude):
