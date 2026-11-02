@@ -104,15 +104,11 @@ fetch_commit() { # repo sha dir
   fi
 }
 
-# xtool 1.23.0 plus fixes not released yet (xtool-org/xtool#290-#293, #295, #302, all still open
-# upstream): branch-pinned dependencies, `type: .dynamic` package products, extension dylibs kept
-# in the host app (FINDINGS.md 24.1, 27.3, 30), and real source paths for SourceKit-LSP
-# (FINDINGS.md 55). 1.22.2 and later carry xtool-org/xtool#337: before it, `xtool auth` in
-# password mode failed with -80045 because the client info did not match the claimed Mac.
-# Built from source with its Swift runtime libraries next to it
-# ($ORIGIN only), so a toolchain swap or upgrade cannot break it.
+# xtool 1.23.0 plus the packaging/build-server fixes in #290-#293, #295 and #302,
+# and the provider user-agent correction in xtool-org/xtool#406.
+# Built from source with its Swift runtime libraries next to it ($ORIGIN only).
 XTOOL_REPO=https://github.com/joshuaswarren/xtool
-XTOOL_SHA=f300489f3a3fddbd9fb598ba6cf69eb24a494527
+XTOOL_SHA=bfa69bf44d632fdd5323e74accb7e7a7ece2e465
 # The SDK stamp that pin writes (SDKBuilder.currentSDKVersion: epoch, darwin-tools and OpenAppleMacros
 # versions). Change it together with XTOOL_SHA; tests/sdk-state/check.sh compares it with the pinned source.
 XTOOL_SDK_VERSION="epoch=4,darwinTools=1.1.0,oam=1.4.1"
