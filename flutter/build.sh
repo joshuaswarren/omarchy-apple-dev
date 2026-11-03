@@ -137,6 +137,16 @@ for d in "$@"; do defines+="${defines:+,}$(printf '%s' "$d" | base64 -w0)"; done
 
 echo "== 2. Native: Runner and plugins as one Swift package"
 python3 "$here/tools/gen-shell-package.py" "$app" "$shell_pkg" "$MIN_IOS"
+# Swift autolinking adds a STRONG LC_LOAD_DYLIB for every framework a
+# package's sources import, regardless of the deployment target: a
+# dependency that imports SwiftUI (Sentry 9.x does) drags in SwiftUICore,
+# which only exists from iOS 18 — the strong load then makes dyld abort
+# the app at launch on every older iOS ("Library not loaded"). Xcode
+# weak-links such frameworks; the cross linker cannot be asked to (an
+# explicit -weak_framework trips the framework's allowed-clients tbd
+# rule), so the load command is rewritten after the link. Env-overridable
+# for apps that import other newer-than-MIN_IOS system frameworks.
+WEAK_FRAMEWORKS=${WEAK_FRAMEWORKS:-SwiftUICore}
 # Native-asset frameworks (flutter_soloud, objective_c, sqlite3, ...) are
 # dlopen'ed by the Dart runtime only on demand, but plugins whose SwiftPM
 # package compiles with -undefined dynamic_lookup against the asset's exports
@@ -308,6 +318,17 @@ if [ -n "${STRIP_FRAMEWORKS:-}" ]; then
   if [ "${#strip_names[@]}" -gt 0 ]; then
     python3 "$here/tools/strip-frameworks.py" "$bundle" "${strip_names[@]}"
   fi
+fi
+# The weak-link rewrite happens last: strip and the @rpath scan above must
+# see the vanilla load commands (distro llvm-strip rejects an unfamiliar
+# LC_LOAD_WEAK_DYLIB), and nothing after this point parses the binaries
+# except signing, which treats both commands identically.
+if [ -n "${WEAK_FRAMEWORKS:-}" ]; then
+  python3 "$here/tools/weaklink.py" "$bundle/Runner" $WEAK_FRAMEWORKS
+  for appex in "$bundle"/PlugIns/*.appex; do
+    [ -d "$appex" ] || continue
+    python3 "$here/tools/weaklink.py" "$appex/$(basename "${appex%.appex}")" $WEAK_FRAMEWORKS
+  done
 fi
 rm -f "$out/Runner.ipa"
 (cd "$out" && zip -qry Runner.ipa Payload)
