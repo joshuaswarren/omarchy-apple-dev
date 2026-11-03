@@ -37,7 +37,10 @@ settings = {
 # configuration's xcconfig (Flutter/Release.xcconfig) and the files it includes
 # (a Google client id, say): take them from the Runner target's settings in the
 # configuration being built, as Xcode does.
-build_settings = Settings(os.path.dirname(os.path.dirname(src)), configuration)
+# sdk-free/flutter-build.sh stages Info.plist under build/ios-sdkfree/<mode>, so the
+# project directory cannot be derived from it; that caller sets IOS_DIR.
+ios_dir = os.environ.get("IOS_DIR") or os.path.dirname(os.path.dirname(src))
+build_settings = Settings(ios_dir, configuration)
 
 def lookup(name):
     if name in settings:

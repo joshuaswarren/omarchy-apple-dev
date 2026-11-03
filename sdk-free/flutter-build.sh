@@ -160,8 +160,9 @@ done
 python3 "$REPO/tools/ibtool" --module Runner --target-device iphone --target-device ipad \
   --link "$BUNDLE/Base.lproj" "$OUT"/sbc/*.storyboardc >/dev/null
 python3 "$HERE/fixplist.py" "$APP/ios/Runner/Info.plist" "$OUT/Info.src.plist"
-python3 "$REPO/flutter/tools/gen-info-plist.py" "$OUT/Info.src.plist" "$OUT/icons/icon.plist" "$BUNDLE/Info.plist" \
-  "$BID" 1.0.0 1 "$MIN" "$SR" 1,2
+CONFIGURATION=Release; [ "$MODE" = debug ] && CONFIGURATION=Debug
+IOS_DIR="$APP/ios" python3 "$REPO/flutter/tools/gen-info-plist.py" "$OUT/Info.src.plist" "$OUT/icons/icon.plist" "$BUNDLE/Info.plist" \
+  "$BID" 1.0.0 1 "$MIN" "$SR" 1,2 "$CONFIGURATION"
 
 echo "== 5. bundle and ipa"
 cp "$OUT/Runner" "$BUNDLE/Runner"
