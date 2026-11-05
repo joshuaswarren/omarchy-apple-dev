@@ -170,7 +170,9 @@ xtool dev run
 An existing Xcode project: `tools/xcodeproj2xtool.py App.xcodeproj` writes an
 xtool adapter next to it, with SourceKit-LSP support. It takes the settings of
 the Release configuration; `--configuration Debug` takes another one's (bundle
-ID, Info.plist values, compilation conditions). See
+ID, Info.plist values, compilation conditions). A dependency whose
+manifest tests the build machine (RxSwift drops RxCocoa when it is not a Mac)
+gets answered as on a Mac by `tools/host-manifests.py omarchy-xtool`. See
 [GETTING-STARTED.md](GETTING-STARTED.md), step 2.
 
 ## Run on your iPhone
