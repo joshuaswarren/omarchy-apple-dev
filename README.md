@@ -168,7 +168,9 @@ xtool dev run
 
 `xtool dev build` alone produces `xtool/HelloOmarchy.app` (arm64 Mach-O).
 An existing Xcode project: `tools/xcodeproj2xtool.py App.xcodeproj` writes an
-xtool adapter next to it, with SourceKit-LSP support. See
+xtool adapter next to it, with SourceKit-LSP support. It takes the settings of
+the Release configuration; `--configuration Debug` takes another one's (bundle
+ID, Info.plist values, compilation conditions). See
 [GETTING-STARTED.md](GETTING-STARTED.md), step 2.
 
 ## Run on your iPhone

@@ -40,4 +40,23 @@ if cmp -s "$tmp/stderr.norm" "$golden/stderr.txt"; then
 else
   echo "FAIL warnings differ from golden"; diff "$golden/stderr.txt" "$tmp/stderr.norm" | sed 's/^/  /'; fail=1
 fi
+# --configuration: the settings of another configuration (bundle ID, conditions),
+# and a clear stop for a name the target does not have.
+python3 "$repo/tools/xcodeproj2xtool.py" "$tmp/proj/FixtureApp.xcodeproj" \
+  --out "$tmp/gen-debug" --configuration Debug >/dev/null 2>&1
+if grep -qx 'bundleID: net.omarchy.fixture.debug' "$tmp/gen-debug/xtool.yml" &&
+  grep -q '\.define("DEBUG")' "$tmp/gen-debug/Package.swift"; then
+  echo "ok   --configuration Debug"
+else
+  echo "FAIL --configuration Debug: bundle ID or DEBUG condition missing"
+  sed 's/^/  /' "$tmp/gen-debug/xtool.yml"; fail=1
+fi
+if python3 "$repo/tools/xcodeproj2xtool.py" "$tmp/proj/FixtureApp.xcodeproj" \
+  --out "$tmp/gen-none" --configuration Staging >/dev/null 2>"$tmp/none.txt"; then
+  echo "FAIL --configuration Staging: accepted a configuration the target lacks"; fail=1
+elif grep -q "no configuration 'Staging' (have: Debug, Release)" "$tmp/none.txt"; then
+  echo "ok   --configuration unknown name refused"
+else
+  echo "FAIL --configuration Staging: unexpected error"; sed 's/^/  /' "$tmp/none.txt"; fail=1
+fi
 exit $fail
