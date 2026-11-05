@@ -177,12 +177,24 @@ if [ "$device" = 1 ]; then
   # device fix; -n keeps what steps 2-3 placed and the built Info.plist.
   # App Store uploads keep the bundle layout: flattening everything into an
   # upload once stalled App Store processing.
+  # Code built as a package (SWIFT_PACKAGE, as the files SwiftGen generates)
+  # reads Bundle.module the other way round: SwiftGen's PlistFiles reads the
+  # resource bundle's Info.plist and traps on a key it lacks (the version, the
+  # display name, a custom key). That plist gets the keys of the target's it
+  # lacks; its own (identifier, package type, name) stay.
   for target in "$app" "$app"/PlugIns/*.appex; do
     [ -d "$target" ] || continue
     name=$(basename "${target%.*}")
     resbundle=$(find "$target" -maxdepth 1 -type d -name "*_$name.bundle" -print -quit)
     [ -n "$resbundle" ] || continue
     cp -an "$resbundle/." "$target/"
+    [ -f "$resbundle/Info.plist" ] || continue
+    "$PY" -c 'import plistlib, sys
+target, bundle = sys.argv[1:]
+own = plistlib.load(open(bundle, "rb"))
+merged = {**plistlib.load(open(target, "rb")), **own}
+if merged != own:
+    plistlib.dump(merged, open(bundle, "wb"), fmt=plistlib.FMT_BINARY)' "$target/Info.plist" "$resbundle/Info.plist"
   done
   if [ -n "$team" ]; then
     echo "== 5. Team prefix =="
