@@ -144,6 +144,29 @@ def package_calls(text):
     return calls
 
 
+def call_url(call):
+    """The url: argument of a .package( ... ) call, read with the same scanner:
+    a url: inside a comment, a string or a nested call is not the argument."""
+    label = re.compile(r"(?<![\w.])url\s*:\s*")
+    depth, i = 0, call.index("(")
+    while i < len(call):
+        if call.startswith(("//", "/*"), i):
+            i = skip_comment(call, i)
+        elif call[i] == '"':
+            i = skip_string(call, i)
+        elif call[i] in "()":
+            depth += 1 if call[i] == "(" else -1
+            i += 1
+        elif depth == 1 and (m := label.match(call, i)):
+            j = m.end()
+            if not call.startswith('"', j) or call.startswith('"""', j):
+                sys.exit("host-manifests: a .package(url:) argument that is not a plain string, left as is")
+            return call[j + 1:skip_string(call, j) - 1]
+        else:
+            i += 1
+    return None
+
+
 def direct_urls(package_swift):
     """identity -> the .package(url: ...) call of each direct URL dependency,
     each call on its own, on one line or several."""
@@ -151,9 +174,9 @@ def direct_urls(package_swift):
     found = {}
     for start, end in package_calls(text):
         call = text[start:end]
-        url = re.search(r'\burl\s*:\s*"([^"]+)"', call)
+        url = call_url(call)
         if url:
-            found[identity(url.group(1))] = call
+            found[identity(url)] = call
     return found
 
 
@@ -233,6 +256,15 @@ def self_test():
                     'from: "1.0.0"),\n'
                     '    // .package(url: "https://github.com/f/Commented.git", from: "1.0.0"),\n'
                     '    /* .package(url: "https://github.com/g/Blocked.git", from: "1.0.0"), */\n')
+        commented_url = os.path.join(root, "CommentedURL.swift")
+        with open(commented_url, "w") as f:
+            f.write('let deps = [\n  .package(url: "https://github.com/a/Alpha.git", from: "1.0.0"),\n'
+                    '  .package(\n    // url: "https://github.com/a/Alpha.git",\n'
+                    '    /* url: "https://github.com/x/Old.git", */\n'
+                    '    url: "https://github.com/b/Beta.git", from: "2.0.0")\n]\n')
+        by_url = direct_urls(commented_url)
+        declare_by_path(commented_url, by_url["alpha"], "Alpha")
+        commented_url_text = open(commented_url).read()
         on_line = direct_urls(one_line)
         declare_by_path(one_line, on_line["alpha"], "Alpha")
         declare_by_path(one_line, on_line["gamma"], "Gamma")
@@ -273,6 +305,12 @@ def self_test():
              set(on_line) == {"alpha", "beta", "gamma", "epsilon"}),
             ("block comment with a parenthesis inside the call",
              f'    .package(path: "{COPIES}/Epsilon"),\n' in one_line_text and "Epsilon.git" not in one_line_text),
+            ("url: read past a commented old url", set(by_url) == {"alpha", "beta"}
+             and "Beta.git" in by_url["beta"] and "Beta.git" not in by_url["alpha"]),
+            ("commented old url: Beta kept, Alpha replaced",
+             '.package(path: ".host-manifests/Alpha")' in commented_url_text
+             and 'url: "https://github.com/b/Beta.git", from: "2.0.0")' in commented_url_text
+             and "github.com/a/Alpha.git\", from" not in commented_url_text),
             ("commented declarations left as they are",
              '// .package(url: "https://github.com/f/Commented.git"' in one_line_text
              and '/* .package(url: "https://github.com/g/Blocked.git"' in one_line_text),
