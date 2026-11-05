@@ -1,0 +1,68 @@
+// omarchy-apple-dev: Gradle init script of kmp/build-framework.sh.
+//
+// Adds a task, omarchyKmpFrameworks, to every project that applies Kotlin
+// Multiplatform. It builds what the iOS framework of that project is linked
+// from (its klib, the klibs it depends on, the libraries it exports, the
+// Compose resources when there are some), then prints all of it, one item a
+// line, for kmp/build-framework.sh to link the framework with Kotlin/Native outside of
+// Gradle. Gradle itself skips that link on Linux: Kotlin/Native turns Apple
+// targets down when the host is not a Mac.
+//
+// Read from the project, never guessed: the framework the build script
+// declares (binaries.framework), its base name, static or not, its export
+// list, its compiler and linker options. The target is the Gradle name given
+// with -PomarchyKmpTarget (iosArm64 by default). The DEBUG framework is read
+// when the project declares one, the RELEASE one otherwise: both share their
+// settings, and kmp/build-framework.sh links an optimized build either way.
+//
+// Output, one line each, tab separated:
+//   VERSION   <Kotlin/Native version>
+//   FRAMEWORK <project path> <build dir> <base name> <static true|false>
+//   INCLUDE   <klib of the project itself>
+//   LIBRARY   <klib it depends on>
+//   EXPORT    <klib it exports>
+//   ARG       <free compiler argument>
+//   LINKER    <linker option>
+//   RESOURCES <Compose resources directory of the target>
+
+allprojects { project ->
+    project.afterEvaluate {
+        def kotlin = project.extensions.findByName('kotlin')
+        if (kotlin == null || !kotlin.hasProperty('targets')) return
+        def targetName = project.findProperty('omarchyKmpTarget') ?: 'iosArm64'
+        def target = kotlin.targets.findByName(targetName)
+        if (target == null || !target.hasProperty('binaries')) return
+        def frameworks = target.binaries.findAll { it.getClass().name.contains('.Framework') }
+        def framework = frameworks.find { it.buildType.name() == 'DEBUG' } ?: frameworks.find()
+        if (framework == null) return
+
+        def compile = framework.compilation.compileTaskProvider
+        def dependencies = framework.compilation.compileDependencyFiles
+        def exported = project.configurations.getByName(framework.exportConfigurationName)
+        def resourcesTask = project.tasks.findByName("assemble${targetName.capitalize()}MainResources")
+        def resources = project.layout.buildDirectory
+            .dir("generated/compose/resourceGenerator/assembledResources/${targetName}Main").get().asFile
+
+        project.tasks.register('omarchyKmpFrameworks') { task ->
+            task.description = 'Builds the inputs of the iOS framework and prints them (omarchy-apple-dev: kmp/build-framework.sh)'
+            task.dependsOn(compile, dependencies, exported)
+            if (resourcesTask != null) task.dependsOn(resourcesTask)
+            task.doLast {
+                def version = project.findProperty('kotlin.native.version')
+                if (version == null) {
+                    def wrapper = kotlin.getClass().classLoader
+                        .loadClass('org.jetbrains.kotlin.gradle.plugin.KotlinPluginWrapperKt')
+                    version = wrapper.getMethod('getKotlinPluginVersion', org.gradle.api.Project).invoke(null, project)
+                }
+                println "VERSION\t${version}"
+                println "FRAMEWORK\t${project.path}\t${project.layout.buildDirectory.get().asFile}\t${framework.baseName}\t${framework.isStatic}"
+                println "INCLUDE\t${compile.get().outputFile.get()}"
+                dependencies.files.findAll { it.exists() }.each { println "LIBRARY\t${it}" }
+                exported.resolve().each { println "EXPORT\t${it}" }
+                framework.freeCompilerArgs.each { println "ARG\t${it}" }
+                framework.linkerOpts.each { println "LINKER\t${it}" }
+                if (resourcesTask != null && resources.isDirectory()) println "RESOURCES\t${resources}"
+            }
+        }
+    }
+}
