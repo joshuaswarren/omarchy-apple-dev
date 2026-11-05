@@ -161,7 +161,22 @@ def call_url(call):
             j = m.end()
             if not call.startswith('"', j) or call.startswith('"""', j):
                 sys.exit("host-manifests: a .package(url:) argument that is not a plain string, left as is")
-            return call[j + 1:skip_string(call, j) - 1]
+            end = skip_string(call, j)
+            k = end
+            while True:  # past whitespace and comments, the argument must end there
+                while k < len(call) and call[k].isspace():
+                    k += 1
+                if call.startswith(("//", "/*"), k):
+                    k = skip_comment(call, k)
+                else:
+                    break
+            if k >= len(call) or call[k] not in ",)":
+                sys.exit("host-manifests: a .package(url:) argument that is not a single string literal "
+                         "(an expression?), left as is")
+            url = call[j + 1:end - 1]
+            if "\\" in url or "\\(" in url:
+                sys.exit("host-manifests: a .package(url:) string with escapes or interpolation, left as is")
+            return url
         else:
             i += 1
     return None
@@ -227,6 +242,14 @@ def run(package):
         print("no direct dependency tests the build host")
 
 
+def _exits(f, *args):
+    try:
+        f(*args)
+    except SystemExit:
+        return True
+    return False
+
+
 def self_test():
     root = tempfile.mkdtemp(prefix="host-manifests-test-")
     try:
@@ -263,6 +286,17 @@ def self_test():
                     '    /* url: "https://github.com/x/Old.git", */\n'
                     '    url: "https://github.com/b/Beta.git", from: "2.0.0")\n]\n')
         by_url = direct_urls(commented_url)
+        concat = os.path.join(root, "Concat.swift")
+        with open(concat, "w") as f:
+            f.write('  .package(url: "https://github.com/a/Alpha.git", from: "1.0.0"),\n'
+                    '  .package(url: "https://github.com/a/Alpha" + "More.git", from: "1.0.0"),\n')
+        concat_before = open(concat).read()
+        concat_refused = _exits(direct_urls, concat) and open(concat).read() == concat_before
+        spaced = os.path.join(root, "Spaced.swift")
+        with open(spaced, "w") as f:
+            f.write('  .package(url: "https://github.com/a/Alpha.git" /* main */ , from: "1.0.0"),\n'
+                    '  .package(url: "https://github.com/b/Beta.git")\n')
+        spaced_urls = direct_urls(spaced)
         declare_by_path(commented_url, by_url["alpha"], "Alpha")
         commented_url_text = open(commented_url).read()
         on_line = direct_urls(one_line)
@@ -305,6 +339,8 @@ def self_test():
              set(on_line) == {"alpha", "beta", "gamma", "epsilon"}),
             ("block comment with a parenthesis inside the call",
              f'    .package(path: "{COPIES}/Epsilon"),\n' in one_line_text and "Epsilon.git" not in one_line_text),
+            ("url expression (concatenation) refused, manifest unchanged", concat_refused),
+            ("url literal then comment or closing parenthesis accepted", set(spaced_urls) == {"alpha", "beta"}),
             ("url: read past a commented old url", set(by_url) == {"alpha", "beta"}
              and "Beta.git" in by_url["beta"] and "Beta.git" not in by_url["alpha"]),
             ("commented old url: Beta kept, Alpha replaced",
