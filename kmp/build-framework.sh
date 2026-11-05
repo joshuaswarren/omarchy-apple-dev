@@ -28,6 +28,11 @@
 # What the framework is made of (base name, exported modules, options,
 # Compose resources) comes from the project itself, through the Gradle init
 # script ios-kmp.init.gradle next to this one. The app around it: kmp/README.md.
+#
+# Each step checks its own result and returns non-zero on failure (|| return):
+# the frameworks are linked in a `kmp_link ... || ...` list, where Bash turns
+# errexit off for the whole call, so set -e alone would let a failed download
+# or copy go on and report success.
 set -euo pipefail
 
 here=$(dirname "$(readlink -f "$0")")
@@ -76,29 +81,54 @@ kmp_platform() {
 }
 
 # A copy of the Linux distribution with the iOS runtime of the macOS one.
+# Built in a scratch directory and moved into the cache only once the
+# download, the copy and the extraction succeeded and both iOS runtimes are
+# there; a cached copy counts only with the mark written then.
 kmp_distribution() {
-  local version="$1" linux dist archive
+  local version="$1" linux dist archive partial target url
   linux="$HOME/.konan/kotlin-native-prebuilt-linux-x86_64-$version"
   dist="$KMP_CACHE/kotlin-native-$version"
   if [ ! -d "$linux" ]; then
     err "Kotlin/Native $version is not in ~/.konan: Gradle downloads it on its first iOS build"
     return 1
   fi
-  if [ -d "$dist/konan/targets/ios_arm64" ] && [ -d "$dist/konan/targets/ios_simulator_arm64" ]; then
+  if [ -f "$dist/.omarchy-kmp-complete" ]; then
     echo "$dist"
     return 0
   fi
   log "Kotlin/Native $version: the iOS runtime of its macOS distribution, from Maven Central (about 300 MB, once)" >&2
-  mkdir -p "$KMP_CACHE"
+  mkdir -p "$KMP_CACHE" || return 1
   archive="$KMP_CACHE/kotlin-native-macos-$version.tar.gz"
-  curl -fL --progress-bar -o "$archive" \
-    "https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-native-prebuilt/$version/kotlin-native-prebuilt-$version-macos-x86_64.tar.gz"
-  rm -rf "$dist"
-  cp -al "$linux" "$dist"
-  tar -xzf "$archive" --strip-components=1 -C "$dist" \
+  partial="$KMP_CACHE/.kotlin-native-$version.partial"
+  url="${KMP_MAVEN:-https://repo.maven.apache.org/maven2}/org/jetbrains/kotlin/kotlin-native-prebuilt/$version/kotlin-native-prebuilt-$version-macos-x86_64.tar.gz"
+  rm -rf "$partial" "$archive" || return 1
+  if ! curl -fL --progress-bar -o "$archive" "$url"; then
+    rm -f "$archive"
+    err "download failed: $url"
+    return 1
+  fi
+  if ! cp -al "$linux" "$partial"; then
+    rm -rf "$partial" "$archive"
+    err "could not copy $linux into $KMP_CACHE"
+    return 1
+  fi
+  if ! tar -xzf "$archive" --strip-components=1 -C "$partial" \
     "kotlin-native-prebuilt-macos-x86_64-$version/konan/targets/ios_arm64" \
-    "kotlin-native-prebuilt-macos-x86_64-$version/konan/targets/ios_simulator_arm64"
+    "kotlin-native-prebuilt-macos-x86_64-$version/konan/targets/ios_simulator_arm64"; then
+    rm -rf "$partial" "$archive"
+    err "the macOS distribution of Kotlin/Native $version could not be extracted (archive kept out of the cache)"
+    return 1
+  fi
   rm -f "$archive"
+  for target in ios_arm64 ios_simulator_arm64; do
+    if [ -z "$(ls -A "$partial/konan/targets/$target" 2>/dev/null)" ]; then
+      rm -rf "$partial"
+      err "the macOS distribution of Kotlin/Native $version has no $target runtime"
+      return 1
+    fi
+  done
+  touch "$partial/.omarchy-kmp-complete" || { rm -rf "$partial"; return 1; }
+  rm -rf "$dist" && mv "$partial" "$dist" || { rm -rf "$partial"; return 1; }
   echo "$dist"
 }
 
@@ -106,22 +136,22 @@ kmp_distribution() {
 kmp_data() {
   local sdk="$1" bundle="$2" data toolchain dep
   toolchain="$KMP_CACHE/toolchain"
-  mkdir -p "$toolchain/usr/bin"
+  mkdir -p "$toolchain/usr/bin" || return 1
   printf '#!/bin/sh\n# lld in its Mach-O mode (ld64): it picks the mode from the name it is called by\nexec %s "$@"\n' \
-    "$bundle/toolset/bin/ld64.lld" >"$toolchain/usr/bin/ld"
-  chmod +x "$toolchain/usr/bin/ld"
+    "$bundle/toolset/bin/ld64.lld" >"$toolchain/usr/bin/ld" || return 1
+  chmod +x "$toolchain/usr/bin/ld" || return 1
   # A static framework is archived by libtool: llvm-libtool-darwin, the llvm-lib of the toolset
   printf '#!/bin/sh\n# libtool of Xcode: llvm-libtool-darwin of the SDK toolset\nexec %s "$@"\n' \
-    "$bundle/toolset/bin/llvm-lib" >"$toolchain/usr/bin/libtool"
-  chmod +x "$toolchain/usr/bin/libtool"
-  ln -sfn "$bundle/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib" "$toolchain/usr/lib"
+    "$bundle/toolset/bin/llvm-lib" >"$toolchain/usr/bin/libtool" || return 1
+  chmod +x "$toolchain/usr/bin/libtool" || return 1
+  ln -sfn "$bundle/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib" "$toolchain/usr/lib" || return 1
   data="$KMP_CACHE/data"
-  mkdir -p "$data/dependencies"
-  ln -sfn "$toolchain" "$data/dependencies/omarchy-kmp-toolchain"
-  ln -sfn "$sdk" "$data/dependencies/omarchy-kmp-sdk"
-  touch "$data/dependencies/.extracted"
+  mkdir -p "$data/dependencies" || return 1
+  ln -sfn "$toolchain" "$data/dependencies/omarchy-kmp-toolchain" || return 1
+  ln -sfn "$sdk" "$data/dependencies/omarchy-kmp-sdk" || return 1
+  touch "$data/dependencies/.extracted" || return 1
   for dep in omarchy-kmp-toolchain omarchy-kmp-sdk; do
-    grep -qx "$dep" "$data/dependencies/.extracted" || echo "$dep" >>"$data/dependencies/.extracted"
+    grep -qx "$dep" "$data/dependencies/.extracted" || echo "$dep" >>"$data/dependencies/.extracted" || return 1
   done
   echo "$data"
 }
@@ -130,7 +160,10 @@ kmp_data() {
 kmp_link() {
   local block="$1" target="$2" out="$3" dynamic="$4" version path build name static dist data sdk bundle props llvm ffi
   version="$(awk -F'\t' '$1 == "VERSION" { print $2 }' <<<"$block")"
-  IFS=$'\t' read -r _ path build name static < <(grep $'^FRAMEWORK\t' <<<"$block")
+  IFS=$'\t' read -r _ path build name static < <(grep $'^FRAMEWORK\t' <<<"$block") || {
+    err "no FRAMEWORK line in the Gradle dump"
+    return 1
+  }
   out="${out:-$build/omarchy-kmp/$target}"
   bundle="$SDKS/darwin.artifactbundle"
   sdk="$(find "$bundle/Developer/Platforms/$(kmp_platform "$target").platform/Developer/SDKs" \
@@ -139,8 +172,8 @@ kmp_link() {
     err "no $(kmp_platform "$target") SDK in $bundle: install-toolchain.sh first"
     return 1
   fi
-  dist="$(kmp_distribution "$version")"
-  data="$(kmp_data "$sdk" "$bundle")"
+  dist="$(kmp_distribution "$version")" || return 1
+  data="$(kmp_data "$sdk" "$bundle")" || { err "could not set up the compiler data in $KMP_CACHE"; return 1; }
   props="$dist/konan/konan.properties"
   llvm="$(sed -n 's/^llvm\.linux_x64\.user *= *//p' "$props")"
   ffi="$(sed -n 's/^libffiDir\.linux_x64 *= *//p' "$props")"
@@ -168,8 +201,8 @@ kmp_link() {
   [ "$static" = true ] && [ "$dynamic" != true ] && args+=(-Xstatic-framework)
 
   log "$path: $name.framework for $target (Kotlin/Native $version, $(basename "$sdk"), several minutes)"
-  mkdir -p "$out"
-  rm -rf "${out:?}/$name.framework"
+  mkdir -p "$out" || return 1
+  rm -rf "${out:?}/$name.framework" || return 1
   if ! KONAN_USE_INTERNAL_SERVER=1 "$dist/bin/kotlinc-native" "-Dos.name=Mac OS X" -Dos.arch=x86_64 \
     "-Xoverride-konan-properties=$overrides" "-Xkonan-data-dir=$data" -opt -Xadd-light-debug=disable \
     -produce framework -target "$target" -module-name "$name" -o "$out/$name" "${args[@]}" >"$out/kotlinc.log" 2>&1; then
@@ -179,12 +212,16 @@ kmp_link() {
   fi
   line="$(awk -F'\t' '$1 == "RESOURCES" { print $2 }' <<<"$block")"
   if [ -n "$line" ]; then
-    rm -rf "$out/compose-resources"
-    cp -r "$line" "$out/compose-resources"
+    rm -rf "$out/compose-resources" || return 1
+    if [ ! -d "$line" ] || ! cp -r "$line" "$out/compose-resources"; then
+      rm -rf "$out/compose-resources"
+      err "could not copy the Compose resources from $line"
+      return 1
+    fi
     log "Compose resources: $out/compose-resources, to copy into the .app as compose-resources/"
   fi
   log "framework: $out/$name.framework"
-  [ "$XCFRAMEWORK" != true ] || kmp_xcframework "$out/$name.framework"
+  [ "$XCFRAMEWORK" != true ] || kmp_xcframework "$out/$name.framework" "$target"
 }
 
 kmp_main() {
@@ -233,34 +270,52 @@ kmp_main() {
   return "$status"
 }
 
-# <Name>.framework (device) wrapped as <Name>.xcframework next to it, the
-# layout a SwiftPM .binaryTarget(path:) takes.
+# <Name>.framework wrapped as <Name>.xcframework next to it, the layout a
+# SwiftPM .binaryTarget(path:) takes, with the slice of its target: ios-arm64
+# for a device, ios-arm64-simulator (platform variant simulator) for the
+# simulator.
 kmp_xcframework() {
-  local framework="$1" name xc
+  local framework="$1" target="${2:-ios_arm64}" name xc id variant
+  case "$target" in
+  ios_arm64) id=ios-arm64 variant="" ;;
+  ios_simulator_arm64) id=ios-arm64-simulator variant=simulator ;;
+  *) err "no xcframework slice for $target"; return 1 ;;
+  esac
   name=$(basename "$framework" .framework)
   xc="$(dirname "$framework")/$name.xcframework"
-  rm -rf "$xc"
-  mkdir -p "$xc/ios-arm64"
-  cp -a "$framework" "$xc/ios-arm64/"
-  python3 - "$xc/Info.plist" "$name" <<'PY'
+  [ -d "$framework" ] || { err "no $framework to wrap"; return 1; }
+  rm -rf "$xc" || return 1
+  if ! { mkdir -p "$xc/$id" && cp -a "$framework" "$xc/$id/" &&
+    python3 - "$xc/Info.plist" "$name" "$id" "$variant" <<'PY'
 import plistlib, sys
 
-path, name = sys.argv[1:]
+path, name, ident, variant = sys.argv[1:]
+library = {
+    "LibraryIdentifier": ident,
+    "LibraryPath": f"{name}.framework",
+    "BinaryPath": f"{name}.framework/{name}",
+    "SupportedArchitectures": ["arm64"],
+    "SupportedPlatform": "ios",
+}
+if variant:
+    library["SupportedPlatformVariant"] = variant
 with open(path, "wb") as f:
     plistlib.dump({
-        "AvailableLibraries": [{
-            "LibraryIdentifier": "ios-arm64",
-            "LibraryPath": f"{name}.framework",
-            "BinaryPath": f"{name}.framework/{name}",
-            "SupportedArchitectures": ["arm64"],
-            "SupportedPlatform": "ios",
-        }],
+        "AvailableLibraries": [library],
         "CFBundlePackageType": "XFWK",
         "XCFrameworkFormatVersion": "1.0",
     }, f)
 PY
+  }; then
+    rm -rf "$xc"
+    err "could not write $xc"
+    return 1
+  fi
   log "xcframework: $xc"
 }
+
+# Sourced (tests/kmp-framework/run.sh), only the functions are defined.
+[ "${BASH_SOURCE[0]}" = "$0" ] || return 0
 
 case " $* " in
 *" -h "* | *" --help "*) kmp_usage ;;

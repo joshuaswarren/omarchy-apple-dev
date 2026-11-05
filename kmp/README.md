@@ -26,12 +26,15 @@ Compose resources) through `ios-kmp.init.gradle`, and writes
 `<module>/build/omarchy-kmp/ios_arm64/<Name>.framework` (`--out` elsewhere),
 with `compose-resources/` next to it when the project has some, and
 `<Name>.xcframework` with `--xcframework`. `--target ios_simulator_arm64`
-links for the simulator. The first run takes the iOS runtime of the macOS
+links for the simulator (xcframework slice `ios-arm64-simulator`). The first run takes the iOS runtime of the macOS
 Kotlin/Native distribution from Maven Central (about 300 MB, kept in
 `~/.cache/omarchy-apple-dev/kmp`); the link itself takes a few minutes.
 
 - The build is optimized and has no debug info: the Linux LLVM asserts on the
   debug info of Apple targets.
+- A failed step (download, extraction, link, copy of the resources, xcframework)
+  stops with a non-zero status; the iOS runtime is cached only once it is
+  extracted complete. `tests/kmp-framework/run.sh` checks these paths offline.
 - `--dynamic` links a dynamic framework even when the project declares a
   static one. `swift build` loads every member of a static archive
   (`-all_load` of the toolset), and the static framework of a Compose

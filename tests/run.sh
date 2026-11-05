@@ -67,6 +67,8 @@ echo "== tests/ship-root-resources/run.sh"
 bash tests/ship-root-resources/run.sh || fail=1
 echo "== tests/ship-bundle-info-plist/run.sh"
 bash tests/ship-bundle-info-plist/run.sh || fail=1
+echo "== tests/kmp-framework/run.sh"
+bash tests/kmp-framework/run.sh || fail=1
 
 echo "== tests/flutter-ship/run.sh"
 bash tests/flutter-ship/run.sh || fail=1
