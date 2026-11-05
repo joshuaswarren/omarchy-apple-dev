@@ -213,6 +213,14 @@ def frameworks(app_dir):
     app = Path(app_dir)
     with (app / "Info.plist").open("rb") as f:
         info = plistlib.load(f)
+    # A static framework (a binary target such as sentry-cocoa's Sentry.xcframework) is linked into
+    # the executable; Xcode never embeds it. SwiftPM copies it anyway, and its ar-archive "binary"
+    # has no Mach-O segments, so rcodesign panics signing it and App Store processing rejects it.
+    for framework in sorted(app.glob("Frameworks/*.framework")):
+        binary = framework / framework.stem
+        if binary.is_file() and is_static_archive(binary):
+            shutil.rmtree(framework)
+            print(f"removed static {framework.name} (linked into the executable, not embedded)")
     renames = {}
     for dylib in sorted(app.glob("Frameworks/lib*.dylib")):
         name = dylib.name[len("lib"):-len(".dylib")]
@@ -234,6 +242,24 @@ def frameworks(app_dir):
         if renames and path.is_file() and not path.is_symlink():
             rename_dylibs(path, renames)
     print(f"wrapped {len(renames)} dylib(s) as frameworks")
+
+
+def is_static_archive(path):
+    """True for an ar archive, or a fat file whose every slice is one."""
+    data = path.read_bytes()
+    if data.startswith(b"!<arch>\n"):
+        return True
+    if data[:4] not in (b"\xca\xfe\xba\xbe", b"\xca\xfe\xba\xbf"):
+        return False
+    fat64 = data[3] == 0xBF
+    (nfat,) = struct.unpack_from(">I", data, 4)
+    entry = 32 if fat64 else 20
+    slices = []
+    for i in range(nfat):
+        off = 8 + i * entry
+        offset = struct.unpack_from(">Q" if fat64 else ">I", data, off + 8)[0]
+        slices.append(data[offset:offset + 8] == b"!<arch>\n")
+    return bool(slices) and all(slices)
 
 
 def rename_dylibs(path, renames):
