@@ -213,9 +213,11 @@ def frameworks(app_dir):
     app = Path(app_dir)
     with (app / "Info.plist").open("rb") as f:
         info = plistlib.load(f)
-    # A static framework (a binary target such as sentry-cocoa's Sentry.xcframework) is linked into
-    # the executable; Xcode never embeds it. SwiftPM copies it anyway, and its ar-archive "binary"
-    # has no Mach-O segments, so rcodesign panics signing it and App Store processing rejects it.
+    # A static framework (the slice of a binary target such as sentry-cocoa's static
+    # Sentry.xcframework) is linked into the executable, yet the xtool build copies it to
+    # Frameworks/ as <Name>.framework. Its "binary" is an ar archive, or a fat file of them, with
+    # no Mach-O segments, and rcodesign 0.29.0 panics signing it (macho_signing.rs:385). Nothing
+    # loads it at run time, so remove it; any resource folders inside it go with it.
     for framework in sorted(app.glob("Frameworks/*.framework")):
         binary = framework / framework.stem
         if binary.is_file() and is_static_archive(binary):
@@ -252,8 +254,10 @@ def is_static_archive(path):
     if data[:4] not in (b"\xca\xfe\xba\xbe", b"\xca\xfe\xba\xbf"):
         return False
     fat64 = data[3] == 0xBF
-    (nfat,) = struct.unpack_from(">I", data, 4)
     entry = 32 if fat64 else 20
+    nfat = struct.unpack_from(">I", data, 4)[0] if len(data) >= 8 else 0
+    if len(data) < 8 + nfat * entry:
+        die(f"{path}: truncated fat header ({len(data)} bytes)")
     slices = []
     for i in range(nfat):
         off = 8 + i * entry
