@@ -358,9 +358,22 @@ def asset_symbol_name(name):
     """The name actool gives an asset's symbol, as AssetSymbols.swiftName in
     tools/darwin-tools: "brand-blue" -> brandBlue, "URL" -> url,
     "Icons/Star" -> iconsStar, "Café" -> café. Words are the runs of Unicode
-    letters and numbers, as Swift's Character.isLetter and isNumber see them."""
+    letters and numbers, as Swift's Character.isLetter and isNumber see them.
+    Raises ValueError for a name whose mapping unicodedata cannot tell."""
+    chars = _swift_characters(name)
+    unsure = [c for c in name if unicodedata.category(c) == "Cn"]
+    if chars and unicodedata.category(chars[0][0]) in ("Mn", "Mc"):
+        unsure.insert(0, chars[0][0])
+    if unsure:
+        # Swift reads the Alphabetic property of these, which unicodedata does
+        # not carry (a leading combining mark: Other_Alphabetic) or does not
+        # know (a code point newer than its Unicode version): no guess.
+        raise ValueError(f"asset {name!r}: cannot tell the name actool gives it "
+                         f"(U+{ord(unsure[0]):04X}, a leading combining mark or a code point "
+                         f"unicodedata {unicodedata.unidata_version} does not know); rename it, "
+                         "or convert with ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = NO")
     parts, word = [], []
-    for char in _swift_characters(name):
+    for char in chars:
         if _swift_is_letter_or_number(char):
             word.append(char)
         elif word:
@@ -2194,7 +2207,10 @@ class Generator:
         assets = sorted({a for c in catalogs if os.path.isdir(c) for a in asset_catalog_names(c)})
         if not assets:
             return
-        txt = asset_symbol_extensions(assets, self.platform)
+        try:
+            txt = asset_symbol_extensions(assets, self.platform)
+        except ValueError as e:
+            raise SystemExit(f"error: asset symbol extensions: {e}")
         with open(os.path.join(src, "GeneratedAssetSymbolExtensions.swift"), "w") as f:
             f.write(txt)
         print(f"wrote Sources/{name}/GeneratedAssetSymbolExtensions.swift "
@@ -2528,6 +2544,14 @@ SELF_TEST_PROJ = r"""// !$*UTF8*$!
 """
 
 
+def _raises(f, *args):
+    try:
+        f(*args)
+    except ValueError:
+        return True
+    return False
+
+
 def self_test():
     import shutil
     import tempfile
@@ -2661,6 +2685,10 @@ def _self_test(root):
                 ("Ⅷ-roman", "_ⅷRoman"), ("Ⓐ circled", "ⓐCircled"), ("naïve_ÉLAN", "naïveÉLAN"),
                 ("ΣΙΓΜΑ", "σιγμα"), ("emoji-👍🏽-x", "emojiX"), ("---", "_"),
                 ("٣abc", "_٣abc"), ("ǅungla", "ǆungla"), ("x²", "x²")))),
+        ("asset symbol name: leading Other_Alphabetic mark refused", _raises(asset_symbol_name, "\u1885Logo")),
+        ("asset symbol name: leading combining accent refused", _raises(asset_symbol_name, "\u0301Logo")),
+        ("asset symbol name: unknown code point refused", _raises(asset_symbol_name, "Logo\U000E0080")),
+        ("asset symbol name: mark inside a word kept", asset_symbol_name("Logo\u1885x") == "logo\u1885x"),
         ("bundleID expanded from xcconfig", "bundleID: net.example.demo" in yml),
         ("generated Info.plist", "infoPath: Info.plist" in yml),
         ("Info.plist content", plistlib.load(open(os.path.join(out, "Info.plist"),
