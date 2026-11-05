@@ -201,6 +201,14 @@ only to hosts you trust.
 > Do the [Windows VM iPhone USB setup](TRYOMARCHY-WINDOWS-USB.md) first.
 > Bare-metal installs do not need it.
 
+## Kotlin Multiplatform apps
+
+Gradle skips the iOS framework of a Kotlin Multiplatform project on Linux;
+`kmp/build-framework.sh` links it from the klibs Gradle builds, and the Swift
+app around it builds as an xtool package with the framework as a binary
+target. Verified on x86_64 with a Compose Multiplatform app. Details:
+[kmp/README.md](kmp/README.md).
+
 ## Flutter apps
 
 Verified on x86_64 with Flutter 3.47.6
@@ -297,6 +305,8 @@ Large projects need `ulimit -n 65536` before `xtool dev build`.
   reports on Linux.
 - [sdk-free/README.md](sdk-free/README.md): the no-Xcode mode.
 - [flutter/README.md](flutter/README.md): the Flutter pipeline.
+- [kmp/README.md](kmp/README.md): the iOS framework of a Kotlin
+  Multiplatform app, linked on Linux, and the app around it.
 - [FINDINGS.md](FINDINGS.md): dated findings and fixes, with supporting
   test records under `receipts/`.
 
