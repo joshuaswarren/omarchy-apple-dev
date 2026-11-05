@@ -23,6 +23,13 @@ else
   echo "FAIL gen-extensions self-test"; sed 's/^/  /' "$tmp_selftest"; fail=1
 fi
 
+echo "== tools/host-manifests.py --self-test"
+if python3 tools/host-manifests.py --self-test >"$tmp_selftest" 2>&1; then
+  grep -E "self-test passed" "$tmp_selftest" | sed 's/^/ok   /'
+else
+  echo "FAIL host-manifests self-test"; sed 's/^/  /' "$tmp_selftest"; fail=1
+fi
+
 echo "== tools/xcodeproj2xtool.py fixture golden"
 bash tests/xcodeproj2xtool/golden-fixture.sh || fail=1
 
