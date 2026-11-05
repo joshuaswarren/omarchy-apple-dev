@@ -2,6 +2,7 @@
 """Generate an xtool adapter package from an Xcode project.
 
     xcodeproj2xtool.py <path/to/App.xcodeproj> [--target NAME] [--out DIR]
+                       [--configuration NAME]
 
 Reads project.pbxproj (OpenStep plist, small stdlib parser) plus the target's
 xcconfig files, and writes an adapter directory (default <project root>/omarchy-xtool):
@@ -309,7 +310,8 @@ def sw_sy(v):
 
 
 class Generator:
-    def __init__(self, proj_path, target_name=None, out_dir=None, bundle_id=None):
+    def __init__(self, proj_path, target_name=None, out_dir=None, bundle_id=None,
+                 configuration="Release"):
         self.proj_path = proj_path
         self.proj_dir = os.path.dirname(os.path.abspath(proj_path))
         self.data = parse_pbxproj(os.path.join(proj_path, "project.pbxproj"))
@@ -326,6 +328,8 @@ class Generator:
         self.out_dir = out_dir or os.path.join(self.proj_dir, "omarchy-xtool")
         self.target_name = target_name
         self.forced_bundle_id = bundle_id
+        # Build configuration whose settings every lookup reads (Release by default).
+        self.configuration = configuration
         self.project = self.objs[self.data["rootObject"]]
 
     def warn(self, msg):
@@ -339,10 +343,11 @@ class Generator:
 
     # -- settings ---------------------------------------------------------
 
-    def config_layers(self, cfg_list_id, config="Release"):
+    def config_layers(self, cfg_list_id, config=None):
         """One configuration of a configuration list: its xcconfig's path
         relative to the project dir (when it has one), then its pbxproj settings."""
         layers = []
+        config = config or self.configuration
         cl = self.objs.get(cfg_list_id)
         for cfg_id in (cl or {}).get("buildConfigurations", []):
             cfg = self.objs[cfg_id]
@@ -366,7 +371,7 @@ class Generator:
                 for l in self.config_layers(cfg_list_id)]
 
     def target_merged(self, target):
-        """Release settings: project xcconfig < project < target xcconfig < target."""
+        """Settings of the configuration: project xcconfig < project < target xcconfig < target."""
         layers = self.config_settings(self.project.get("buildConfigurationList"))
         layers += self.config_settings(target.get("buildConfigurationList"))
         return layers
@@ -1869,8 +1874,16 @@ class Generator:
                       f"{', '.join(other_exts)}")
         return embedded
 
+    def configuration_names(self, cfg_list_id):
+        cl = self.objs.get(cfg_list_id) or {}
+        return [self.objs[c].get("name") for c in cl.get("buildConfigurations", [])]
+
     def run(self):
         target_id, self.target = self.pick_target()
+        names = self.configuration_names(self.target.get("buildConfigurationList"))
+        if self.configuration not in names:
+            raise SystemExit(f"error: target {self.target.get('name')!r} has no configuration "
+                             f"{self.configuration!r} (have: {', '.join(names) or 'none'})")
         target = self.target
         name = target["name"]
         layers = self.target_merged(target)
@@ -3056,6 +3069,10 @@ def main():
                                      "has several")
     ap.add_argument("--out", help="output directory "
                                   "(default: <project root>/omarchy-xtool)")
+    ap.add_argument("--configuration", metavar="NAME", default="Release",
+                    help="build configuration whose settings the adapter takes: "
+                         "bundle ID, Info.plist values, compilation conditions "
+                         "(default: Release)")
     ap.add_argument("--self-test", action="store_true",
                     help="run the built-in round-trip check on a synthetic "
                          "classic-groups project")
@@ -3073,7 +3090,8 @@ def main():
     if not args.project.endswith(".xcodeproj") or \
             not os.path.isfile(os.path.join(args.project, "project.pbxproj")):
         ap.error(f"{args.project} is not an .xcodeproj directory")
-    Generator(args.project, args.target, args.out, args.bundle_id).run()
+    Generator(args.project, args.target, args.out, args.bundle_id,
+              args.configuration).run()
 
 
 if __name__ == "__main__":
