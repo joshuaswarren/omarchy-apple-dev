@@ -35,6 +35,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import unicodedata
 import xml.etree.ElementTree as ET
 
 # ---------------------------------------------------------------- pbxproj parser
@@ -326,16 +327,56 @@ SDK_MEMBERS = {
 }
 
 
+def _swift_characters(text):
+    """Text split into approximate Swift Characters: a code point with the
+    combining marks and joiners that follow it."""
+    chars = []
+    for c in text:
+        if chars and (unicodedata.category(c).startswith("M") or c in "\u200d\ufe0f"
+                      or chars[-1][-1] == "\u200d"):
+            chars[-1] += c
+        else:
+            chars.append(c)
+    return chars
+
+
+# Symbols with the Alphabetic property (Other_Alphabetic), which str.isalpha
+# does not see: circled, parenthesized-squared and negative squared letters.
+_OTHER_ALPHABETIC_SYMBOLS = ((0x24B6, 0x24E9), (0x1F130, 0x1F149), (0x1F150, 0x1F169),
+                             (0x1F170, 0x1F189))
+
+
+def _swift_is_letter_or_number(char):
+    """Character.isLetter || Character.isNumber: the properties of its first
+    code point (Alphabetic, Numeric_Type)."""
+    first = char[0]
+    return (first.isalpha() or first.isnumeric() or unicodedata.category(first) == "Nl"
+            or any(lo <= ord(first) <= hi for lo, hi in _OTHER_ALPHABETIC_SYMBOLS))
+
+
 def asset_symbol_name(name):
-    """The name actool gives an asset's symbol (tools/darwin-tools AssetSymbols.swiftName):
-    "brand-blue" -> brandBlue, "URL" -> url, "Icons/Star" -> iconsStar."""
-    parts = [w for w in re.split(r"[^0-9A-Za-z]+", name) if w]
+    """The name actool gives an asset's symbol, as AssetSymbols.swiftName in
+    tools/darwin-tools: "brand-blue" -> brandBlue, "URL" -> url,
+    "Icons/Star" -> iconsStar, "Café" -> café. Words are the runs of Unicode
+    letters and numbers, as Swift's Character.isLetter and isNumber see them."""
+    parts, word = [], []
+    for char in _swift_characters(name):
+        if _swift_is_letter_or_number(char):
+            word.append(char)
+        elif word:
+            parts.append(word)
+            word = []
+    if word:
+        parts.append(word)
     if not parts:
         return "_"
-    first = parts[0]
-    head = first.lower() if first == first.upper() else first[0].lower() + first[1:]
-    out = head + "".join(p[0].upper() + p[1:] for p in parts[1:])
-    return "_" + out if out[0].isdigit() else out
+    first = "".join(parts[0])
+    if first == first.upper():
+        head = first.lower()
+    else:
+        head = parts[0][0].lower() + "".join(parts[0][1:])
+    out = head + "".join(p[0].upper() + "".join(p[1:]) for p in parts[1:])
+    return "_" + out if _swift_characters(out)[0][0].isnumeric() else out
 
 
 def asset_catalog_names(catalog):
@@ -2515,8 +2556,11 @@ def _self_test(root):
     open(os.path.join(src, "Helper.swift"), "w").write("let y = 2\n")
     open(os.path.join(src, "Unused.swift"), "w").write("let z = 3\n")
     os.makedirs(os.path.join(src, "Assets.xcassets"))
-    for asset in ("brand-blue.colorset", "red.colorset", "Logo.imageset"):
+    for asset in ("brand-blue.colorset", "red.colorset", "Logo.imageset", "Café.colorset",
+                  "背景.colorset", "Icons/Star.imageset"):
         os.makedirs(os.path.join(src, "Assets.xcassets", asset))
+    with open(os.path.join(src, "Assets.xcassets", "Icons", "Contents.json"), "w") as f:
+        json.dump({"properties": {"provides-namespace": True}}, f)
     open(os.path.join(root, "proj.xcconfig"), "w").write(
         "// comment\nBUNDLE_PREFIX = net.example\n")
     with open(os.path.join(proj, "project.xcworkspace", "xcshareddata",
@@ -2605,6 +2649,18 @@ def _self_test(root):
         ("asset symbol extensions: UIColor", "static var brandBlue: UIColor { UIColor(resource:" in symbols),
         ("asset symbol extensions: UIImage", "static var logo: UIImage" in symbols),
         ("asset symbol extensions: SDK member left out", "static var red:" not in symbols),
+        ("asset symbol extensions: Unicode names", "static var café: Color" in symbols
+         and "static var 背景: Color" in symbols),
+        ("asset symbol extensions: namespaced name", "static var iconsStar: Image" in symbols),
+        # Names AssetSymbols.swiftName (tools/darwin-tools) gives, from a Swift 6.4 run
+        ("asset symbol names match AssetSymbols.swiftName", all(
+            asset_symbol_name(n) == want for n, want in (
+                ("Café", "café"), ("Cafe\u0301", "cafe\u0301"), ("背景", "背景"),
+                ("背景-色", "背景色"), ("Icons/Star", "iconsStar"), ("brand-blue", "brandBlue"),
+                ("URL", "url"), ("9patch", "_9patch"), ("½ cup", "_½Cup"),
+                ("Ⅷ-roman", "_ⅷRoman"), ("Ⓐ circled", "ⓐCircled"), ("naïve_ÉLAN", "naïveÉLAN"),
+                ("ΣΙΓΜΑ", "σιγμα"), ("emoji-👍🏽-x", "emojiX"), ("---", "_"),
+                ("٣abc", "_٣abc"), ("ǅungla", "ǆungla"), ("x²", "x²")))),
         ("bundleID expanded from xcconfig", "bundleID: net.example.demo" in yml),
         ("generated Info.plist", "infoPath: Info.plist" in yml),
         ("Info.plist content", plistlib.load(open(os.path.join(out, "Info.plist"),
