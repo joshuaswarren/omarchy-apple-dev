@@ -80,29 +80,67 @@ def answer_as_mac(directory):
     return changed
 
 
+def skip_comment(text, i):
+    """Index just past the Swift comment starting at i: // to the end of the
+    line, /* to its */, block comments nested as Swift nests them."""
+    if text.startswith("//", i):
+        end = text.find("\n", i)
+        return len(text) if end < 0 else end
+    depth, i = 1, i + 2
+    while depth:
+        if i >= len(text):
+            sys.exit("host-manifests: Package.swift has a /* comment without its */, left as is")
+        if text.startswith("/*", i):
+            depth, i = depth + 1, i + 2
+        elif text.startswith("*/", i):
+            depth, i = depth - 1, i + 2
+        else:
+            i += 1
+    return i
+
+
+def skip_string(text, i):
+    """Index just past the string literal starting at i ("..." or \"\"\"...\"\"\")."""
+    quote = '\"\"\"' if text.startswith('\"\"\"', i) else '"'
+    i += len(quote)
+    while not text.startswith(quote, i):
+        if i >= len(text):
+            sys.exit("host-manifests: Package.swift has a string without its closing quote, left as is")
+        i += 2 if text[i] == "\\" else 1
+    return i + len(quote)
+
+
 def package_calls(text):
     """(start, end) of every .package( ... ) call of a manifest, the closing
-    parenthesis found past nested calls, string literals and newlines."""
-    calls = []
-    for m in re.finditer(r"\.package\s*\(", text):
-        depth, i = 1, m.end()
-        while i < len(text) and depth:
-            c = text[i]
-            if c == '"':
-                i += 1
-                while i < len(text) and text[i] != '"':
-                    i += 2 if text[i] == "\\" else 1
-            elif c == "/" and text.startswith("//", i):
-                i = text.find("\n", i)
-                i = len(text) if i < 0 else i
-            elif c == "(":
-                depth += 1
-            elif c == ")":
-                depth -= 1
+    parenthesis found past nested calls, string literals, comments (block
+    comments nested) and newlines. Calls inside a comment are not calls. A raw
+    string (#"...") is refused rather than guessed at."""
+    calls, i = [], 0
+    while i < len(text):
+        if text.startswith(("//", "/*"), i):
+            i = skip_comment(text, i)
+        elif text[i] == '"':
+            i = skip_string(text, i)
+        elif text.startswith('#"', i):
+            sys.exit("host-manifests: Package.swift has a raw string (#\"...\"), not supported, left as is")
+        elif (m := re.compile(r"\.package\s*\(").match(text, i)):
+            depth, i = 1, m.end()
+            while depth:
+                if i >= len(text):
+                    sys.exit("host-manifests: Package.swift has a .package( call without its "
+                             "closing parenthesis, left as is")
+                if text.startswith(("//", "/*"), i):
+                    i = skip_comment(text, i)
+                elif text[i] == '"':
+                    i = skip_string(text, i)
+                elif text.startswith('#"', i):
+                    sys.exit("host-manifests: Package.swift has a raw string (#\"...\"), not supported, left as is")
+                else:
+                    depth += {"(": 1, ")": -1}.get(text[i], 0)
+                    i += 1
+            calls.append((m.start(), i))
+        else:
             i += 1
-        if depth:
-            sys.exit("host-manifests: Package.swift has a .package( call without its closing parenthesis")
-        calls.append((m.start(), i))
     return calls
 
 
@@ -190,10 +228,15 @@ def self_test():
                     '.package(url: "https://github.com/b/Beta.git", from: "2.0.0")]\n'
                     '    .package(\n        url: "https://github.com/c/Gamma.git",\n'
                     '        .upToNextMajor(from: "3.0.0") // (a comment)\n    ),\n'
-                    '    .package(name: "Delta", path: "../Delta"),\n')
+                    '    .package(name: "Delta", path: "../Delta"),\n'
+                    '    .package(url: "https://github.com/e/Epsilon.git", /* pinned (see notes) /* nested ) */ */ '
+                    'from: "1.0.0"),\n'
+                    '    // .package(url: "https://github.com/f/Commented.git", from: "1.0.0"),\n'
+                    '    /* .package(url: "https://github.com/g/Blocked.git", from: "1.0.0"), */\n')
         on_line = direct_urls(one_line)
         declare_by_path(one_line, on_line["alpha"], "Alpha")
         declare_by_path(one_line, on_line["gamma"], "Gamma")
+        declare_by_path(one_line, on_line["epsilon"], "Epsilon")
         one_line_text = open(one_line).read()
         # A read-only checkout, as SwiftPM leaves them, copied as run() does
         ro_copy = os.path.join(root, "copy", "RxSwift")
@@ -226,7 +269,13 @@ def self_test():
             ("other dependency kept", "swift-log" in open(pkg).read()),
             ("whole-word host test only", not tests_host(plain)),
             ("copy of a read-only checkout answered", ro_changed == 3),
-            ("each call on its own", set(on_line) == {"alpha", "beta", "gamma"}),
+            ("each call on its own, commented calls skipped",
+             set(on_line) == {"alpha", "beta", "gamma", "epsilon"}),
+            ("block comment with a parenthesis inside the call",
+             f'    .package(path: "{COPIES}/Epsilon"),\n' in one_line_text and "Epsilon.git" not in one_line_text),
+            ("commented declarations left as they are",
+             '// .package(url: "https://github.com/f/Commented.git"' in one_line_text
+             and '/* .package(url: "https://github.com/g/Blocked.git"' in one_line_text),
             ("two on one line: second kept", one_line_text.startswith(
                 f'let deps = [.package(path: "{COPIES}/Alpha"), '
                 '.package(url: "https://github.com/b/Beta.git", from: "2.0.0")]')),
