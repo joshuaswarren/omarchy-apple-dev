@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### install-usb.py: an .ipa on a USB iPhone without root
+
+- `tools/install-usb.py UDID app.ipa` installs a development- or store-signed ipa on a USB-connected iOS 17+ device with no root and no Xcode. `pymobiledevice3 apps install --udid` is rejected by modern iOS (the installation service moved behind CoreDevice), and `remote start-tunnel --connection-type usb` finds nothing on Linux when the phone does not bring its USB NCM link up; the root route (`sudo pymobiledevice3 remote tunneld` + the `--tunnel` WebSocket bridge) needs sudo on the build box. The script opens pymobiledevice3's in-process userspace tunnel (UserspaceRsdTunnel, pymobiledevice3 11.38+; Python 3.13+ for TCP tunnels on iOS 18.2+), which reaches CoreDeviceProxy over plain usbmux, and installs through it with `InstallationProxyService.install_from_local`. The tunnel and the install run in one process on purpose: the tunnel's RSD address lives only inside that process (its PyTCP stack is process-global).
+- Proven in daily use as the USB fallback of a release flow that otherwise installs over the network tunnel.
+
 ## v0.4.3
 
 ### xtool password login uses the provider user-agent

@@ -287,6 +287,14 @@ Large projects need `ulimit -n 65536` before `xtool dev build`.
   `--user-only`, `--curses-compat`.
 - `device-run.sh`: pair, install, launch, LLDB, console, crash pull; `--rsd`
   and `--over-tailnet` for tunnel installs.
+- `tools/install-usb.py`: install an `.ipa` on a USB-connected iPhone (iOS 17+)
+  without root: `tools/install-usb.py UDID app.ipa`. `pymobiledevice3 apps
+  install` is refused by modern iOS (the installation service lives behind
+  CoreDevice) and the tunneld bridge needs `sudo`; this script bridges
+  CoreDeviceProxy over plain usbmux with the in-process userspace tunnel and
+  installs through it. Needs pymobiledevice3 11.38+ (Python 3.13+ on iOS
+  18.2+). The tunnel and the install share one process on purpose: the
+  tunnel's RSD address is process-global in pymobiledevice3's PyTCP stack.
 - `ship.sh`: App Store `.ipa`, offline validation, `--upload`. Helpers:
   `tools/asc.py`, `tools/darwin-tools`, `tools/xcstringstool`.
 - `ship-mac.sh`: macOS `.app` from a SwiftPM package, Developer ID signing,
