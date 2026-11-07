@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### A no-root USB install of a signed .ipa, documented
+
+- `pymobiledevice3 apps install app.ipa --userspace --udid <udid>` (pymobiledevice3 11.38+) installs an already-signed .ipa over USB without root: `--userspace` opens the same in-process userspace tunnel `device-run.sh --lldb` attaches through (no tunneld, no sudo) and installs through the installation proxy; `usbmux list` prints the UDID. README names the command in the device section; `device-run.sh`'s usage header points to it. Verified on an iPhone 16 Pro Max / iOS 27.0.1 over USB from Ubuntu 24.04 aarch64 (Python 3.13.16, pymobiledevice3 11.38.0): 0→100%, "Installation succeed".
+
 ## v0.4.3
 
 ### xtool password login uses the provider user-agent
