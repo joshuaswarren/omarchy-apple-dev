@@ -50,6 +50,8 @@ class CompatSuiteTest(unittest.TestCase):
             written = "".join(open(os.path.join(logs, f)).read() for f in sorted(os.listdir(logs)) if f.endswith(".log"))
         self.assertNotIn(os.path.expanduser("~"), written)
         self.assertIn("~/leak", written)
+        receipt_text = "".join(open(os.path.join(logs, f)).read() for f in sorted(os.listdir(logs)) if f.endswith(".md"))
+        self.assertNotIn(os.path.expanduser("~"), receipt_text)
 
     def test_compile_failure_blocks_ship_but_not_test(self):
         status, rows, _, _ = run({"compile": "echo 'x.swift:3: error: no such module'; exit 1",
