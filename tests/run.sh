@@ -4,7 +4,7 @@
 set -uo pipefail
 here=$(dirname "$(readlink -f "$0")")
 repo=$here/..
-cd "$repo"
+cd "$repo" || exit 1
 fail=0
 tmp_selftest=$(mktemp)
 trap 'rm -f "$tmp_selftest"' EXIT
@@ -118,6 +118,13 @@ else
   echo "SKIP  compile-golden.sh: regenerates goldens with Apple's ibtool and"
   echo "      needs a Mac with Xcode (xcrun not on this host). Run it there:"
   echo "      tar -C tests/ibtool -cf - src | ssh mac \"\$(cat tests/ibtool/compile-golden.sh)\" | tar -C tests/ibtool -xf -"
+fi
+
+echo "== tests/test_compat_suite.py (tools/compat-suite.py)"
+if python3 -m unittest discover -s tests -p 'test_compat_suite.py' >"$tmp_selftest" 2>&1; then
+  grep -E "^Ran|^OK" "$tmp_selftest" | sed 's/^/ok   /'
+else
+  echo "FAIL compat-suite tests"; sed 's/^/  /' "$tmp_selftest"; fail=1
 fi
 
 if [ "$fail" -ne 0 ]; then
