@@ -48,9 +48,10 @@ class CompatSuiteTest(unittest.TestCase):
             suite.run_suite(config, work, os.path.join(work, "out"), 30, self.sysfs)
             logs = os.path.join(work, "out")
             written = "".join(open(os.path.join(logs, f)).read() for f in sorted(os.listdir(logs)) if f.endswith(".log"))
+        rows, devices, apple, _ = suite.run_suite(config, work, os.path.join(work, "out2"), 30, self.sysfs)
         self.assertNotIn(os.path.expanduser("~"), written)
         self.assertIn("~/leak", written)
-        receipt_text = "".join(open(os.path.join(logs, f)).read() for f in sorted(os.listdir(logs)) if f.endswith(".md"))
+        receipt_text = suite.receipt(config, rows, devices, apple, None)
         self.assertNotIn(os.path.expanduser("~"), receipt_text)
 
     def test_compile_failure_blocks_ship_but_not_test(self):
