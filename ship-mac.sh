@@ -53,7 +53,7 @@ exe = [p["name"] for p in json.load(sys.stdin)["products"] if "executable" in p[
 sys.exit("set PRODUCT: no single executable product") if len(exe) != 1 else print(exe[0])')}"
 
 # Bundle id: xtool.yml (the generator writes it) unless overridden.
-bundle_id=${BUNDLE_ID:-$(sed -n 's/^bundleID:[[:space:]]*//p' xtool.yml 2>/dev/null | head -1)}
+bundle_id=${BUNDLE_ID:-$(sed -n 's/^bundleID:[[:space:]]*//p' xtool.yml 2>/dev/null | head -1 || true)}
 bundle_id=${bundle_id:-com.example.$product}
 app_target_path=$(swift package describe --type json | python3 -c '
 import json, sys
@@ -182,7 +182,7 @@ echo "== 6. Extensions =="
 # target's resource bundle plus a flat copy, per-extension entitlements and
 # provisioning profile, signed inside-out with Developer ID.
 mkdir -p build
-python3 - xtool.yml > build/extensions.tsv <<'PY'
+if [ -f xtool.yml ]; then python3 - xtool.yml > build/extensions.tsv <<'PY'
 import re, sys
 cur, rows = None, []
 for line in open(sys.argv[1], encoding="utf-8"):
@@ -197,7 +197,9 @@ for line in open(sys.argv[1], encoding="utf-8"):
 for row in rows:
     print("\t".join(row))
 PY
-
+else
+  : > build/extensions.tsv
+fi
 pkg_json=$(swift package describe --type json)
 while IFS=$'\t' read -r ext ext_bundle ext_info; do
   [ -n "$ext" ] || continue
