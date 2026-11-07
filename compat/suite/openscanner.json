@@ -1,0 +1,9 @@
+{
+  "name": "openscanner",
+  "repo": "https://github.com/pencilresearch/OpenScanner",
+  "sha": "6336c2cba1cac759f3f14bc306b4569ac6bfe494",
+  "license": "MIT",
+  "adapt": "python3 \"$OMARCHY_APPLE_DEV/tools/xcodeproj2xtool.py\" openscanner.xcodeproj",
+  "compile": "cd omarchy-xtool && ulimit -n 65536 && xtool dev build",
+  "ship": "cd omarchy-xtool && \"$OMARCHY_APPLE_DEV/ship.sh\""
+}

@@ -1,0 +1,9 @@
+{
+  "name": "clean-architecture-swiftui",
+  "repo": "https://github.com/nalexn/clean-architecture-swiftui",
+  "sha": "9eca97b8cfff96a14084b564b1fefd949c93d232",
+  "license": "MIT",
+  "adapt": "python3 \"$OMARCHY_APPLE_DEV/tools/xcodeproj2xtool.py\" CountriesSwiftUI.xcodeproj",
+  "compile": "cd omarchy-xtool && ulimit -n 65536 && xtool dev build",
+  "ship": "cd omarchy-xtool && \"$OMARCHY_APPLE_DEV/ship.sh\""
+}
