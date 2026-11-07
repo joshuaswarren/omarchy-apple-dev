@@ -189,6 +189,18 @@ without root. With `--rsd` or `--over-tailnet`, `--console [SECONDS]` streams
 the app's own output and `--symbolicate` pulls and resolves crash reports
 ([docs/CRASH-SYMBOLICATION.md](docs/CRASH-SYMBOLICATION.md)).
 
+An already-built signed `.ipa` installs over USB without root, no launch, with
+pymobiledevice3 11.38+ (run with the toolchain venv's python):
+
+```
+~/pymobile3-venv/bin/pymobiledevice3 usbmux list        # the UDID
+~/pymobile3-venv/bin/pymobiledevice3 apps install app.ipa --userspace --udid <udid>
+```
+
+`--userspace` opens the same in-process tunnel `--lldb` attaches through and
+installs via the installation proxy; development and App Store signatures both
+work. `usbmux list` prints the UDID.
+
 Use USB for initial pairing. The Linux wireless RemotePairing path is
 blocked on iOS 26 (FINDINGS.md item 17). On iOS 27, pair once over USB and
 copy the pairing record to the host on your tailnet. With Wi-Fi and

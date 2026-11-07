@@ -21,6 +21,9 @@
 #       headers of images missing from the sysroot, a ~30 s attach whose system
 #       frames show module names only; complete gives full symbols in minutes.
 #       LLDB_PYTHONHOME: a CPython of the version lldb links, when the system has none.
+#   Installing an already-signed .ipa over USB without root, no launch — the
+#       same in-process tunnel --lldb uses, from pymobiledevice3 11.38.0:
+#       ~/pymobile3-venv/bin/pymobiledevice3 apps install app.ipa --userspace --udid U
 #   ./device-run.sh --network [--udid U]   WiFi, phone on the SAME network.
 #       TESTED EXHAUSTIVELY 2026-09-16 on iOS 26.6.2: BLOCKED for hosts the
 #       phone has no RemotePairing tunnel with. iOS gives every host its own
