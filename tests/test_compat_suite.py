@@ -55,6 +55,7 @@ class CompatSuiteTest(unittest.TestCase):
             "echo '== 6. sign'; echo 'rcodesign: failed' >&2; exit 1": ("BLOCKED", "FAIL", "BLOCKED"),
             "echo '== 6. sign'; echo '== 7. package'; echo 'zip: failed' >&2; exit 1": ("FAIL", "PASS", "BLOCKED"),
             MARKERS + "echo 'ITMS-90000 rejected' >&2; exit 1": ("PASS", "PASS", "FAIL"),
+            "echo 'note: a warning line' >&2; echo 'Fatal error: icon has no source' >&2; exit 1": ("FAIL", "BLOCKED", "BLOCKED"),
         }
         for ship, expected in cases.items():
             with self.subTest(ship=ship):

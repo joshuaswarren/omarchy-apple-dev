@@ -1745,3 +1745,37 @@ processing rejects. `tools/car_check.py` now enforces the Apple-visible rules be
 passing control is the car Xcode's actool writes from the same catalog, not an Apple-accepted
 upload. Detail and every command are in `receipts/2026-10-14-icecubes-assets-car.md`.
 
+
+## The first compat-suite runs: two apps, two real gaps, 2026-11-07
+
+`tools/compat-suite.py` (same branch) ran two MIT Swift apps through adapt, compile,
+package, sign, install, launch, test and archive on a 13-inch M1 MacBook Pro
+(Swift 6.4.2, the Xcode 27.2 SDK pieces, registered by `install-toolchain.sh
+--user-only`). Receipts: `receipts/2026-11-07-compat-suite-countries.md` and
+`receipts/2026-11-07-compat-suite-openscanner.md`, with the stage logs. No iPhone
+was attached (sysfs shows 8 USB devices, none with vendor 05ac), so install,
+launch and the device test are NEEDS-DEVICE by construction.
+
+1. nalexn/clean-architecture-swiftui (9eca97b8): adapt and compile PASS
+   (`xtool dev build`, 10 s). `ship.sh` dies in step 3: the Linux actool aborts
+   the whole invocation with `Fatal error: AppIcon 'AppIcon' declares size
+   1024x1024 but no source file matched` (Trace/breakpoint trap, core dumped)
+   because the project's AppIcon.appiconset ships only smaller sizes. Xcode's
+   actool would keep going; ours must not fatal on an icon the app-icon step
+   asked for but the catalog cannot provide - the tool should skip the icon
+   with the usual warning, or ship.sh should check the 1024 entry first
+   (FINDINGS item on single-size catalogs already covers the upload side).
+2. pencilresearch/OpenScanner (6336c2cb): compile FAIL before a build happens:
+   `multiple resources named 'Assets.xcassets' in target
+   'ScannerWidgetExtension'` (and the same for `Contents.json`). The generator
+   copied the widget's own Assets.xcassets and a Preview Assets.xcassets under
+   the same target name. SwiftPM forbids same-name resources in one target;
+   the generator must flatten or rename (it already warns; it must instead
+   pick one catalog or nest per-directory).
+3. `ship-mac.sh` assumed an xtool.yml adapter: both the bundle-id probe and the
+   extensions step died on a plain SwiftPM package (set -e + pipefail on a
+   missing file). Fixed on this branch: the probe tolerates the missing file
+   and the extensions step is skipped when there is no adapter. First proof:
+   the HelloOmarchy SwiftUI Mac app built with it on 2026-11-07, signed ad hoc,
+   ran on an M1 Ultra Mac Studio (macOS 27.0.1) with zero crash reports; the
+   console sat at the login screen, so no window could be shown.

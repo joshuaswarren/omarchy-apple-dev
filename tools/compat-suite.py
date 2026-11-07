@@ -47,7 +47,8 @@ def usb_state(sysfs="/sys/bus/usb/devices"):
 
 def first_error(log):
     lines = [line.strip() for line in log.splitlines() if line.strip()]
-    for line in lines:
+    hard = [line for line in lines if re.search(r"error:|Fatal error|Trace/breakpoint", line)]
+    for line in hard or lines:
         if ERROR_LINE.search(line):
             return line[:200]
     return lines[-1][:200] if lines else "(no output)"
