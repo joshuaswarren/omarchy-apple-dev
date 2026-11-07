@@ -197,8 +197,9 @@ for line in open(sys.argv[1], encoding="utf-8"):
 for row in rows:
     print("\t".join(row))
 PY
+else
+  : > build/extensions.tsv
 fi
-
 pkg_json=$(swift package describe --type json)
 while IFS=$'\t' read -r ext ext_bundle ext_info; do
   [ -n "$ext" ] || continue

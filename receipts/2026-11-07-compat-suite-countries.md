@@ -6,7 +6,7 @@ Project: https://github.com/nalexn/clean-architecture-swiftui at 9eca97b8cfff96a
 |---|---|---|---|---|
 | adapt | PASS | 0 | 0 |  |
 | compile | PASS | 10 | 0 |  |
-| package | FAIL | 10 | 133 | /home/joshuawarren/scratch/w7m-suite/apps/clean-architecture-swiftui/omarchy-xtool/Sources/CountriesSwiftUI/CountriesSwiftUI/Repositories/Database/CountriesDBRepository.swift:40:10: [1;33mwarning: [ |
+| package | FAIL | 10 | 133 | Swift/ErrorType.swift:254: Fatal error: Error raised at top level: AppIcon 'AppIcon' declares size 1024x1024 but no source file matched |
 | sign | BLOCKED | 10 | 133 |  |
 | install | NEEDS-DEVICE |  |  |  |
 | launch | NEEDS-DEVICE |  |  |  |

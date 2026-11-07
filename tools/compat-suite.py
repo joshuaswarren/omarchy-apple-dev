@@ -63,7 +63,7 @@ def run_stage(command, cwd, log_path, timeout):
     except subprocess.TimeoutExpired as err:
         rc, log = 124, f"timeout after {timeout}s\n{(err.stdout or b'').decode(errors='replace')}"
     with open(log_path, "w") as handle:
-        handle.write(log)
+        handle.write(log.replace(os.path.expanduser("~"), "~"))
     return rc, log, round(time.monotonic() - start)
 
 

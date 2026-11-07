@@ -41,6 +41,16 @@ class CompatSuiteTest(unittest.TestCase):
         self.assertEqual(apple, 1)
         self.assertEqual((status["install"], status["launch"]), ("DEVICE-PRESENT", "DEVICE-PRESENT"))
 
+    def test_stage_logs_do_not_leak_absolute_home_paths(self):
+        config = {"name": "app", "repo": "r", "sha": "s", "license": "MIT",
+                  "compile": 'echo "$HOME/leak"; test -n "$HOME"'}
+        with tempfile.TemporaryDirectory() as work:
+            suite.run_suite(config, work, os.path.join(work, "out"), 30, self.sysfs)
+            logs = os.path.join(work, "out")
+            written = "".join(open(os.path.join(logs, f)).read() for f in sorted(os.listdir(logs)) if f.endswith(".log"))
+        self.assertNotIn(os.path.expanduser("~"), written)
+        self.assertIn("~/leak", written)
+
     def test_compile_failure_blocks_ship_but_not_test(self):
         status, rows, _, _ = run({"compile": "echo 'x.swift:3: error: no such module'; exit 1",
                                   "ship": "touch ship-ran", "test": "true"}, self.sysfs)
