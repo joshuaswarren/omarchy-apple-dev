@@ -17,6 +17,8 @@
 #   6  device xcframework:    slice ios-arm64, no platform variant
 #   7  simulator xcframework: slice ios-arm64-simulator, variant simulator,
 #                             linked against the simulator SDK
+#   8  aarch64 distribution:  a checksum mismatch fails, nothing cached; a
+#                             matching archive is cached and reused
 # Mutants (each must fail its row):
 #   M1  drop `|| return 1` after kmp_distribution -> row 1 goes on to the link
 #   M2  drop the cp check of the Compose resources -> row 4 succeeds
@@ -65,13 +67,15 @@ mkdir -p "$tmp/archives"
 mk_archive "$tmp/archives/good.tgz" ios_arm64 ios_simulator_arm64
 mk_archive "$tmp/archives/partial.tgz" ios_arm64
 
-# curl stand-in: copies $KMP_TEST_ARCHIVE to -o, or fails when it is unset
+# curl stand-in: copies $KMP_TEST_ARCHIVE to -o, or fails when it is unset;
+# without -o (SHA256SUMS of the aarch64 release) prints $KMP_TEST_SUMS
 mkdir -p "$tmp/bin"
 cat >"$tmp/bin/curl" <<'SH'
 #!/bin/sh
 echo curl >>"$KMP_TEST_LOG/curl"
 [ -n "${KMP_TEST_ARCHIVE:-}" ] || exit 22
 while [ "$#" -gt 0 ]; do [ "$1" = -o ] && { cp "$KMP_TEST_ARCHIVE" "$2"; exit; }; shift; done
+cat "${KMP_TEST_SUMS:-/dev/null}"
 SH
 chmod +x "$tmp/bin/curl"
 
@@ -82,7 +86,7 @@ for p in iPhoneOS iPhoneSimulator; do
 done
 
 export HOME="$tmp/home" XDG_CACHE_HOME="$tmp/cache" XDG_CONFIG_HOME="$tmp/cfg" PATH="$tmp/bin:$PATH"
-export KMP_TEST_LOG="$tmp/log"
+export KMP_TEST_LOG="$tmp/log" KMP_HOST=x86_64 KMP_ARM64_VERSION=$V
 mkdir -p "$KMP_TEST_LOG" "$tmp/res/composeResources"
 # shellcheck source=/dev/null
 source "$SCRIPT"
@@ -165,6 +169,20 @@ if kmp_link "$(block "$tmp/b7" "")" ios_simulator_arm64 "" true >/dev/null 2>&1 
   grep -qx ios_simulator_arm64 "$KMP_TEST_LOG/kotlinc"; then
   ok "row 7: simulator xcframework, slice ios-arm64-simulator, variant simulator, simulator SDK"
 else bad "row 7: simulator xcframework metadata: ${libs:-none}"; fi
+
+# 8 aarch64 distribution, checked against SHA256SUMS
+a64=kotlin-native-prebuilt-linux-aarch64-$V
+mkdir -p "$tmp/a64/$a64/bin" && printf '#!/bin/sh\n' >"$tmp/a64/$a64/bin/kotlinc-native" && chmod +x "$tmp/a64/$a64/bin/kotlinc-native"
+tar -czf "$tmp/archives/a64.tgz" -C "$tmp/a64" "$a64"
+echo "0000000000000000000000000000000000000000000000000000000000000000  $a64.tar.gz" >"$tmp/sums.bad"
+echo "$(sha256sum <"$tmp/archives/a64.tgz" | cut -d' ' -f1)  $a64.tar.gz" >"$tmp/sums.good"
+home64="$tmp/cache/omarchy-apple-dev/kmp/$a64"
+if KMP_TEST_ARCHIVE="$tmp/archives/a64.tgz" KMP_TEST_SUMS="$tmp/sums.bad" kmp_arm64_home >/dev/null 2>&1 || [ -e "$home64" ]; then
+  bad "row 8: a checksum mismatch was accepted or cached"
+elif [ "$(KMP_TEST_ARCHIVE="$tmp/archives/a64.tgz" KMP_TEST_SUMS="$tmp/sums.good" kmp_arm64_home 2>/dev/null)" != "$home64" ] ||
+  [ ! -f "$home64/.omarchy-kmp-complete" ] || [ "$(KMP_TEST_ARCHIVE="" kmp_arm64_home 2>/dev/null)" != "$home64" ]; then
+  bad "row 8: the checked distribution was not cached or not reused"
+else ok "row 8: aarch64 distribution checked against SHA256SUMS, cached, reused"; fi
 
 [ "$fail" = 0 ] && echo "kmp-framework: all rows passed" || echo "kmp-framework: FAILED"
 exit "$fail"

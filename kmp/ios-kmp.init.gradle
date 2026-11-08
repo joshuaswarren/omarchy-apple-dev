@@ -25,6 +25,12 @@
 //   LINKER    <linker option>
 //   RESOURCES <Compose resources directory of the target>
 
+// Linux aarch64 (-PomarchyKmpHostArch=amd64, in a fresh JVM): the Kotlin
+// plugin turns every native target off on that host, so it is told x86_64
+// before it loads; kotlin.native.home gives it the aarch64 compiler.
+def hostArch = gradle.startParameter.projectProperties['omarchyKmpHostArch']
+if (hostArch) System.setProperty('os.arch', hostArch)
+
 allprojects { project ->
     project.afterEvaluate {
         def kotlin = project.extensions.findByName('kotlin')
@@ -60,6 +66,7 @@ allprojects { project ->
                 dependencies.files.findAll { it.exists() }.each { println "LIBRARY\t${it}" }
                 exported.resolve().each { println "EXPORT\t${it}" }
                 framework.freeCompilerArgs.each { println "ARG\t${it}" }
+                framework.binaryOptions.each { key, value -> println "ARG\t-Xbinary=${key}=${value}" }
                 framework.linkerOpts.each { println "LINKER\t${it}" }
                 if (resourcesTask != null && resources.isDirectory()) println "RESOURCES\t${resources}"
             }

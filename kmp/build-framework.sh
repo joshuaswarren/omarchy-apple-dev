@@ -29,6 +29,16 @@
 # Compose resources) comes from the project itself, through the Gradle init
 # script ios-kmp.init.gradle next to this one. The app around it: kmp/README.md.
 #
+# Linux aarch64: JetBrains ships no Kotlin/Native for this host, and the
+# Kotlin Gradle plugin turns every native target off on it. An unofficial
+# aarch64 build (voize-gmbh/kotlin, KMP_ARM64_RELEASE) stands in: its
+# distribution, LLVM and libffi are downloaded and checked against the
+# release's SHA256SUMS; Gradle is told it runs on x86_64 (os.arch, set by
+# ios-kmp.init.gradle in a fresh JVM, so --no-daemon) and builds the klibs with
+# that distribution (kotlin.native.home); the link then runs it as on x86_64,
+# with the aarch64 LLVM and libffi. Its Kotlin version (KMP_ARM64_VERSION) is
+# the one used, whatever the project's plugin says.
+#
 # Each step checks its own result and returns non-zero on failure (|| return):
 # the frameworks are linked in a `kmp_link ... || ...` list, where Bash turns
 # errexit off for the whole call, so set -e alone would let a failed download
@@ -42,6 +52,9 @@ KMP_CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/omarchy-apple-dev/kmp"
 SDKS="${XDG_CONFIG_HOME:+$XDG_CONFIG_HOME/swiftpm/swift-sdks}"
 SDKS="${SDKS:-$HOME/.swiftpm/swift-sdks}"
 XCFRAMEWORK=false
+KMP_HOST="${KMP_HOST:-$(uname -m)}"
+KMP_ARM64_VERSION="${KMP_ARM64_VERSION:-2.4.21}"
+KMP_ARM64_RELEASE="${KMP_ARM64_RELEASE:-https://github.com/voize-gmbh/kotlin/releases/download/v$KMP_ARM64_VERSION-linux-arm64}"
 
 log() { printf '\033[1m[kmp]\033[0m %s\n' "$*"; }
 err() { echo "kmp: $*" >&2; }
@@ -80,14 +93,81 @@ kmp_platform() {
   esac
 }
 
+# One file of the aarch64 release into $2, checked against its SHA256SUMS.
+kmp_fetch() {
+  local file="$1" dest="$2" sum
+  sum="$(curl -fsSL "$KMP_ARM64_RELEASE/SHA256SUMS" | awk -v f="$file" '$2 == f { print $1 }')" || sum=""
+  if [ -z "$sum" ]; then
+    err "no checksum for $file in $KMP_ARM64_RELEASE/SHA256SUMS"
+    return 1
+  fi
+  if ! curl -fL --progress-bar -o "$dest" "$KMP_ARM64_RELEASE/$file" >&2 ||
+    ! echo "$sum  $dest" | sha256sum -c --quiet - >&2; then
+    rm -f "$dest"
+    err "download of $file failed or does not match its checksum: $KMP_ARM64_RELEASE"
+    return 1
+  fi
+}
+
+# The aarch64 Kotlin/Native distribution, extracted into the cache once and
+# marked complete; prints its path.
+kmp_arm64_home() {
+  local version="$KMP_ARM64_VERSION" name home archive partial
+  name="kotlin-native-prebuilt-linux-aarch64-$version"
+  home="$KMP_CACHE/$name"
+  if [ -f "$home/.omarchy-kmp-complete" ]; then
+    echo "$home"
+    return 0
+  fi
+  log "Kotlin/Native $version for Linux aarch64, unofficial build: $KMP_ARM64_RELEASE (about 200 MB, once)" >&2
+  mkdir -p "$KMP_CACHE" || return 1
+  archive="$KMP_CACHE/$name.tar.gz"
+  partial="$KMP_CACHE/.$name.partial"
+  rm -rf "$partial" && mkdir -p "$partial" || return 1
+  kmp_fetch "$name.tar.gz" "$archive" || { rm -rf "$partial"; return 1; }
+  if ! tar -xzf "$archive" --strip-components=1 -C "$partial" || [ ! -x "$partial/bin/kotlinc-native" ]; then
+    rm -rf "$partial" "$archive"
+    err "$name.tar.gz could not be extracted"
+    return 1
+  fi
+  rm -f "$archive"
+  touch "$partial/.omarchy-kmp-complete" || { rm -rf "$partial"; return 1; }
+  rm -rf "$home" && mv "$partial" "$home" || { rm -rf "$partial"; return 1; }
+  echo "$home"
+}
+
+# LLVM and libffi of the aarch64 release, which no JetBrains server hosts,
+# extracted into the compiler's data directory and marked there as extracted.
+kmp_arm64_deps() {
+  local deps="$1/dependencies" dep
+  shift
+  for dep in "$@"; do
+    grep -qx "$dep" "$deps/.extracted" 2>/dev/null && [ -d "$deps/$dep" ] && continue
+    log "$dep, from $KMP_ARM64_RELEASE (once)"
+    rm -rf "${deps:?}/$dep" || return 1
+    kmp_fetch "$dep.tar.gz" "$deps/$dep.tar.gz" || return 1
+    if ! tar -xzf "$deps/$dep.tar.gz" -C "$deps" || [ ! -d "$deps/$dep" ]; then
+      rm -rf "${deps:?}/$dep" "$deps/$dep.tar.gz"
+      err "$dep.tar.gz could not be extracted"
+      return 1
+    fi
+    rm -f "$deps/$dep.tar.gz"
+    echo "$dep" >>"$deps/.extracted" || return 1
+  done
+}
+
 # A copy of the Linux distribution with the iOS runtime of the macOS one.
 # Built in a scratch directory and moved into the cache only once the
 # download, the copy and the extraction succeeded and both iOS runtimes are
 # there; a cached copy counts only with the mark written then.
 kmp_distribution() {
   local version="$1" linux dist archive partial target url
-  linux="$HOME/.konan/kotlin-native-prebuilt-linux-x86_64-$version"
   dist="$KMP_CACHE/kotlin-native-$version"
+  if [ "$KMP_HOST" = aarch64 ]; then
+    linux="$(kmp_arm64_home)" || return 1
+  else
+    linux="$HOME/.konan/kotlin-native-prebuilt-linux-x86_64-$version"
+  fi
   if [ ! -d "$linux" ]; then
     err "Kotlin/Native $version is not in ~/.konan: Gradle downloads it on its first iOS build"
     return 1
@@ -158,8 +238,13 @@ kmp_data() {
 
 # Links one framework. $1: the dump of omarchyKmpFrameworks for one project.
 kmp_link() {
-  local block="$1" target="$2" out="$3" dynamic="$4" version path build name static dist data sdk bundle props llvm ffi
+  local block="$1" target="$2" out="$3" dynamic="$4" version path build name static dist data sdk bundle props llvm ffi host=linux_x64
   version="$(awk -F'\t' '$1 == "VERSION" { print $2 }' <<<"$block")"
+  if [ "$KMP_HOST" = aarch64 ]; then
+    [ "$version" = "$KMP_ARM64_VERSION" ] ||
+      log "the project's Kotlin plugin is $version; Kotlin/Native $KMP_ARM64_VERSION (the aarch64 build) compiles and links"
+    version="$KMP_ARM64_VERSION" host=linux_arm64
+  fi
   IFS=$'\t' read -r _ path build name static < <(grep $'^FRAMEWORK\t' <<<"$block") || {
     err "no FRAMEWORK line in the Gradle dump"
     return 1
@@ -175,8 +260,11 @@ kmp_link() {
   dist="$(kmp_distribution "$version")" || return 1
   data="$(kmp_data "$sdk" "$bundle")" || { err "could not set up the compiler data in $KMP_CACHE"; return 1; }
   props="$dist/konan/konan.properties"
-  llvm="$(sed -n 's/^llvm\.linux_x64\.user *= *//p' "$props")"
-  ffi="$(sed -n 's/^libffiDir\.linux_x64 *= *//p' "$props")"
+  llvm="$(sed -n "s/^llvm\.$host\.user *= *//p" "$props")"
+  ffi="$(sed -n "s/^libffiDir\.$host *= *//p" "$props")"
+  if [ "$KMP_HOST" = aarch64 ]; then
+    kmp_arm64_deps "$data" "$llvm" "$ffi" || return 1
+  fi
   local overrides="llvmHome.macos_x64=$llvm;libffiDir.macos_x64=$ffi;dependencies.macos_x64=$llvm $ffi"
   overrides+=";dependencies.macos_x64-$target=;targetToolchain.macos_x64-$target=omarchy-kmp-toolchain"
   overrides+=";additionalToolsDir.macos_x64=omarchy-kmp-toolchain;targetSysRoot.$target=omarchy-kmp-sdk"
@@ -243,7 +331,17 @@ kmp_main() {
     return 2
   }
   [ -x "$dir/gradlew" ] || { err "$dir has no gradlew: give the root of a Gradle build"; return 1; }
-  [ "$(uname -m)" = x86_64 ] || { err "linux x86_64 only, like the ios environment"; return 1; }
+  # The project's configuration cache would refuse the init script's task (it reads the model at run time).
+  local gradle_args=(--no-configuration-cache)
+  case "$KMP_HOST" in
+  x86_64) ;;
+  aarch64)
+    local home
+    home="$(kmp_arm64_home)" || return 1
+    gradle_args+=(--no-daemon -PomarchyKmpHostArch=amd64 "-Pkotlin.native.home=$home")
+    ;;
+  *) err "linux x86_64 or aarch64 only"; return 1 ;;
+  esac
   if ! command -v java >/dev/null 2>&1; then
     err "Gradle needs a JDK on the PATH (java)"
     return 1
@@ -251,7 +349,7 @@ kmp_main() {
   dir="$(cd "$dir" && pwd)"
   task="${module:+$module:}omarchyKmpFrameworks"
   log "Gradle: the klibs of the iOS framework and what it exports ($gradle_target)"
-  dump="$(cd "$dir" && ./gradlew -q --console=plain -I "$KMP_INIT" "-PomarchyKmpTarget=$gradle_target" "$task")" || {
+  dump="$(cd "$dir" && ./gradlew -q --console=plain "${gradle_args[@]}" -I "$KMP_INIT" "-PomarchyKmpTarget=$gradle_target" "$task")" || {
     err "Gradle failed, see above"
     return 1
   }
