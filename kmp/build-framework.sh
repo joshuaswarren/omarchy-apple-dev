@@ -196,6 +196,7 @@ kmp_link() {
     EXPORT) args+=("-Xexport-library=$value") ;;
     ARG) args+=("$value") ;;
     LINKER) args+=(-linker-option "$value") ;;
+    BINOPT) args+=("-Xbinary=$value") ;;
     esac
   done <<<"$block"
   [ "$static" = true ] && [ "$dynamic" != true ] && args+=(-Xstatic-framework)

@@ -10,10 +10,11 @@
 //
 // Read from the project, never guessed: the framework the build script
 // declares (binaries.framework), its base name, static or not, its export
-// list, its compiler and linker options. The target is the Gradle name given
-// with -PomarchyKmpTarget (iosArm64 by default). The DEBUG framework is read
-// when the project declares one, the RELEASE one otherwise: both share their
-// settings, and kmp/build-framework.sh links an optimized build either way.
+// list, its binary options, its compiler and linker options. The target is
+// the Gradle name given with -PomarchyKmpTarget (iosArm64 by default). The
+// DEBUG framework is read when the project declares one, the RELEASE one
+// otherwise: both share their settings, and kmp/build-framework.sh links an
+// optimized build either way.
 //
 // Output, one line each, tab separated:
 //   VERSION   <Kotlin/Native version>
@@ -23,7 +24,12 @@
 //   EXPORT    <klib it exports>
 //   ARG       <free compiler argument>
 //   LINKER    <linker option>
+//   BINOPT    <framework binary option, key=value, passed as -Xbinary=key=value>
 //   RESOURCES <Compose resources directory of the target>
+//
+// Everything the task prints is read once here, at configuration time, as
+// plain serializable values: with the Gradle configuration cache on, the
+// task's action must not read the project model at run time (issue #150).
 
 allprojects { project ->
     project.afterEvaluate {
@@ -43,25 +49,38 @@ allprojects { project ->
         def resources = project.layout.buildDirectory
             .dir("generated/compose/resourceGenerator/assembledResources/${targetName}Main").get().asFile
 
+        def version = project.findProperty('kotlin.native.version')
+        if (version == null) {
+            def wrapper = kotlin.getClass().classLoader
+                .loadClass('org.jetbrains.kotlin.gradle.plugin.KotlinPluginWrapperKt')
+            version = wrapper.getMethod('getKotlinPluginVersion', org.gradle.api.Project).invoke(null, project)
+        }
+        def projPath = project.path
+        def buildDir = project.layout.buildDirectory.get().asFile
+        def baseName = framework.baseName
+        def staticFramework = framework.isStatic
+        def include = compile.flatMap { it.outputFile }
+        def libraries = dependencies.elements.map { it.collect { it.asFile } }
+        def exports = exported.elements.map { it.collect { it.asFile } }
+        def compilerArgs = framework.freeCompilerArgs.toList()
+        def linkerOpts = framework.linkerOpts.toList()
+        def binaryOptions = new LinkedHashMap(framework.binaryOptions)
+        def hasResources = resourcesTask != null
+
         project.tasks.register('omarchyKmpFrameworks') { task ->
             task.description = 'Builds the inputs of the iOS framework and prints them (omarchy-apple-dev: kmp/build-framework.sh)'
             task.dependsOn(compile, dependencies, exported)
-            if (resourcesTask != null) task.dependsOn(resourcesTask)
+            if (hasResources) task.dependsOn(resourcesTask)
             task.doLast {
-                def version = project.findProperty('kotlin.native.version')
-                if (version == null) {
-                    def wrapper = kotlin.getClass().classLoader
-                        .loadClass('org.jetbrains.kotlin.gradle.plugin.KotlinPluginWrapperKt')
-                    version = wrapper.getMethod('getKotlinPluginVersion', org.gradle.api.Project).invoke(null, project)
-                }
-                println "VERSION\t${version}"
-                println "FRAMEWORK\t${project.path}\t${project.layout.buildDirectory.get().asFile}\t${framework.baseName}\t${framework.isStatic}"
-                println "INCLUDE\t${compile.get().outputFile.get()}"
-                dependencies.files.findAll { it.exists() }.each { println "LIBRARY\t${it}" }
-                exported.resolve().each { println "EXPORT\t${it}" }
-                framework.freeCompilerArgs.each { println "ARG\t${it}" }
-                framework.linkerOpts.each { println "LINKER\t${it}" }
-                if (resourcesTask != null && resources.isDirectory()) println "RESOURCES\t${resources}"
+                System.out.println "VERSION\t${version}"
+                System.out.println "FRAMEWORK\t${projPath}\t${buildDir}\t${baseName}\t${staticFramework}"
+                System.out.println "INCLUDE\t${include.get()}"
+                libraries.get().findAll { it.exists() }.each { System.out.println "LIBRARY\t${it}" }
+                exports.get().each { System.out.println "EXPORT\t${it}" }
+                compilerArgs.each { System.out.println "ARG\t${it}" }
+                linkerOpts.each { System.out.println "LINKER\t${it}" }
+                binaryOptions.each { e -> System.out.println "BINOPT\t${e.key}=${e.value}" }
+                if (hasResources && resources.isDirectory()) System.out.println "RESOURCES\t${resources}"
             }
         }
     }
