@@ -11,7 +11,9 @@
 #   3  ios-run:  a copy of device-run.sh outside the repo (as ios-run runs it) still finds
 #                tools/compile-app-icon.sh through APPLE_DEV_REPO
 #   4  failure:  actool exiting 1 gives a warning, and the app is still installed
-# Mutant: the usb path back on xtool dev run -> row 1 fails.
+#   5  no app:   xtool dev build leaving no xtool/*.app exits non-zero with an error naming it,
+#                and runs neither actool nor xtool install
+# Mutants: the usb path back on xtool dev run -> row 1 fails; no .app check -> row 5 fails.
 set -uo pipefail
 here=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
 repo=$(cd "$here/../.." && pwd)
@@ -28,6 +30,7 @@ cat >"$tmp/home/.local/bin/xtool" <<'STUB'
 #!/usr/bin/env bash
 echo "xtool $*" >>"$STUB_LOG"
 if [ "$1 $2" = "dev build" ]; then
+  [ -z "${STUB_NO_APP:-}" ] || { rm -rf xtool; exit 0; }
   rm -rf xtool && mkdir -p xtool/Demo.app
   python3 -c 'import plistlib,sys; plistlib.dump({"CFBundleIdentifier": "com.example.demo", "MinimumOSVersion": "17.0"}, open(sys.argv[1], "wb"))' xtool/Demo.app/Info.plist
 fi
@@ -60,7 +63,7 @@ drive() {
   local script=$1; shift
   : >"$tmp/log"
   OUT=$(cd "$proj" && env HOME="$tmp/home" PATH="$tmp/bin:$PATH" STUB_LOG="$tmp/log" \
-    ACTOOL="$tmp/bin/actool" PY=python3 STUB_ACTOOL_RC="${STUB_ACTOOL_RC:-0}" \
+    ACTOOL="$tmp/bin/actool" PY=python3 STUB_ACTOOL_RC="${STUB_ACTOOL_RC:-0}" STUB_NO_APP="${STUB_NO_APP:-}" \
     APPLE_DEV_REPO="${APPLE_DEV_REPO:-}" timeout 60 bash "$script" "$@" 2>&1)
   RC=$?
   LOG=$(cat "$tmp/log")
@@ -104,6 +107,13 @@ STUB_ACTOOL_RC=1 drive "$repo/device-run.sh"
 has "$OUT" "WARNING: the app icon did not compile" "row 4 warning"
 has "$LOG" "xtool install xtool/Demo.app" "row 4 still installed"
 [ "$RC" = 0 ] && ok "row 4 exit 0" || bad "row 4 exit $RC"
+
+echo "== row 5: xtool dev build leaves no .app"
+STUB_NO_APP=1 drive "$repo/device-run.sh"
+[ "$RC" != 0 ] && ok "row 5 exit $RC" || bad "row 5 exit 0"
+has "$OUT" "ERROR: xtool dev build left no xtool/*.app" "row 5 error"
+not_has "$LOG" "actool" "row 5 no icon compiled"
+not_has "$LOG" "xtool install" "row 5 nothing installed"
 
 echo "== mutant: usb path back on xtool dev run (row 1 must fail)"
 mkdir -p "$tmp/mut"

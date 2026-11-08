@@ -494,13 +494,16 @@ rsd_run() {
 # of this script from a temp file; the repo is then found as ios-run finds it.
 dev_build() {
   $XT dev build
+  local apps=(xtool/*.app)
+  APP=${apps[0]}
+  [ -d "$APP" ] || { echo "ERROR: xtool dev build left no xtool/*.app" >&2; exit 1; }
   local dir icon_sh=
   for dir in "$(dirname "$(readlink -f "$0")")" "${APPLE_DEV_REPO:-$HOME/Tools/omarchy-apple-dev}"; do
     [ -x "$dir/tools/compile-app-icon.sh" ] && { icon_sh=$dir/tools/compile-app-icon.sh; break; }
   done
   if [ -z "$icon_sh" ]; then
     echo "WARNING: tools/compile-app-icon.sh not found; the app installs without its icon" >&2
-  elif ! "$icon_sh" "$(ls -d xtool/*.app | head -n1)"; then
+  elif ! "$icon_sh" "$APP"; then
     echo "WARNING: the app icon did not compile; the app installs without it" >&2
   fi
 }
@@ -530,7 +533,7 @@ usb)
     lldb_session
   elif [ "$LLDB" = 0 ]; then
     dev_build
-    $XT install "${UDID_ARGS[@]}" "$(ls -d xtool/*.app | head -n1)"
+    $XT install "${UDID_ARGS[@]}" "$APP"
   else
     # lldb_session stops the app, installs, then launches it suspended and attaches, so
     # breakpoints in startup code hit.
@@ -544,7 +547,7 @@ network)
   echo "Expects: paired over USB once, Developer Mode on, same LAN segment."
   $XT devices --network
   dev_build
-  $XT install --network "${UDID_ARGS[@]}" "$(ls -d xtool/*.app | head -n1)"
+  $XT install --network "${UDID_ARGS[@]}" "$APP"
   ;;
 rsd)
   rsd_run
