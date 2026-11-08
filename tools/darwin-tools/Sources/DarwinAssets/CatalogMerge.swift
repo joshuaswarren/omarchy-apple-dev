@@ -92,8 +92,10 @@ public enum CatalogMerge {
                 case "" where isDir:
                     try fm.createDirectory(at: target, withIntermediateDirectories: true)
                     let folderContents = child.appendingPathComponent("Contents.json")
-                    if fm.fileExists(atPath: folderContents.path) {
-                        try fm.copyItem(at: folderContents, to: target.appendingPathComponent("Contents.json"))
+                    let targetContents = target.appendingPathComponent("Contents.json")
+                    // A folder of the same name in two catalogs merges, as in Apple's actool: the first Contents.json stays.
+                    if fm.fileExists(atPath: folderContents.path), !fm.fileExists(atPath: targetContents.path) {
+                        try fm.copyItem(at: folderContents, to: targetContents)
                     }
                     try copy(child, into: target, catalog: catalog)
                 default:
