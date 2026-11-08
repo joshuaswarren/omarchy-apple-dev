@@ -61,6 +61,7 @@ public enum CatalogMerge {
                         skipped.append("\(where_): .\(format) images are not supported by AssetKit")
                     } else {
                         try place(child, at: target)
+                        try keyBitmapsAtOneX(target)
                     }
                 case "colorset":
                     if try !copyColorSet(child, to: target) {
@@ -115,6 +116,25 @@ public enum CatalogMerge {
             return images.compactMap { ($0["filename"] as? String).map { URL(fileURLWithPath: $0).pathExtension.lowercased() } }
                 // HEIC/HEIF decode through libheif's heif-convert.
                 .first { !["png", "jpg", "jpeg", "svg", "pdf", "heic", "heif"].contains($0) }
+        }
+
+        /// A bitmap entry with no scale (Xcode's "Single Scale" set) gets "1x", as Apple's actool keys it: AssetKit
+        /// keys it at scale 0, which UIKit never matches ("No image named ..."). Vector sources stay scale-free.
+        func keyBitmapsAtOneX(_ imageSet: URL) throws {
+            let url = imageSet.appendingPathComponent("Contents.json")
+            guard var contents = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any],
+                  var images = contents["images"] as? [[String: Any]] else { return }
+            var changed = false
+            for i in images.indices where images[i]["scale"] == nil {
+                guard let name = images[i]["filename"] as? String,
+                      ["png", "jpg", "jpeg", "heic", "heif"].contains(URL(fileURLWithPath: name).pathExtension.lowercased())
+                else { continue }
+                images[i]["scale"] = "1x"
+                changed = true
+            }
+            guard changed else { return }
+            contents["images"] = images
+            try JSONSerialization.data(withJSONObject: contents).write(to: url)
         }
 
         /// Copies a colorset without its color-less entries (Xcode's empty AccentColor placeholder).
