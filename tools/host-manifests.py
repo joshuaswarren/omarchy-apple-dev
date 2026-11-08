@@ -19,7 +19,12 @@ os(Linux), copies each into <package>/.host-manifests/<name> with those tests
 answered as on a Mac (true, true, false), declares it by path in place of its
 URL, and resolves again. A dependency of a dependency is reported and left as
 is: xtool builds the app from a package of its own, where a path declared
-here does not replace it. Running it twice changes nothing more. Stdlib only.
+here does not replace it. Running it twice changes nothing more.
+
+A refusal leaves the package as it was: the root manifest and the host copies
+are put back as they were when a step refuses, and a dependency identity
+declared by two calls is refused before the package is resolved at all.
+Stdlib only.
 """
 
 import os
@@ -54,6 +59,25 @@ def tests_host(directory):
             if any(HOST_LINE.match(line) for line in f):
                 return True
     return False
+
+
+def force_rmtree(directory):
+    """rmtree that also removes read-only checkouts: SwiftPM leaves them 555 and
+    copytree keeps the modes, and unlink needs write on the 555 directory itself,
+    which os.walk does not hand back."""
+    try:
+        os.chmod(directory, os.stat(directory).st_mode | stat.S_IWUSR)
+    except OSError:
+        pass
+    for parent, dirs, files in os.walk(directory):
+        for entry in dirs + files:
+            if not os.path.islink(os.path.join(parent, entry)):
+                try:
+                    os.chmod(os.path.join(parent, entry),
+                             os.stat(os.path.join(parent, entry)).st_mode | stat.S_IWUSR)
+                except OSError:
+                    pass
+    shutil.rmtree(directory, ignore_errors=True)
 
 
 def writable(directory):
@@ -184,15 +208,23 @@ def call_url(call):
 
 def direct_urls(package_swift):
     """identity -> the .package(url: ...) call of each direct URL dependency,
-    each call on its own, on one line or several."""
+    each call on its own, on one line or several.
+
+    An identity declared by two calls is refused: SwiftPM gives them the same
+    dependency name, so the tool cannot tell which one to declare by path, and
+    keeping one of them would drop the other without a word."""
     text = open(package_swift).read()
-    found = {}
+    calls = {}
     for start, end in package_calls(text):
         call = text[start:end]
         url = call_url(call)
         if url:
-            found[identity(url)] = call
-    return found
+            calls.setdefault(identity(url), []).append(call)
+    for name, group in calls.items():
+        if len(group) > 1:
+            sys.exit(f"host-manifests: the dependency identity {name} is declared {len(group)} times "
+                     f"in Package.swift, left as is")
+    return {name: group[0] for name, group in calls.items()}
 
 
 def declare_by_path(package_swift, call, name):
@@ -211,33 +243,84 @@ def resolve(package):
     subprocess.run(["swift", "package", "resolve"], cwd=package, check=True)
 
 
-def run(package):
+def rewrite(package, checkouts, direct):
+    """The rewrite phase: the direct dependencies whose manifest tests the
+    build host are copied into .host-manifests with their host tests answered
+    as on a Mac, and declared by path in the root manifest.
+
+    The phase is a transaction: when a step refuses, the root manifest and the
+    host copies are put back as they were, and the copies this run created are
+    removed."""
+    package_swift = os.path.join(package, "Package.swift")
+    manifest = open(package_swift, "rb").read()  # the manifest before the phase
+    copies = os.path.join(package, COPIES)
+    had_copies = os.path.isdir(copies)
+    backup = tempfile.mkdtemp(prefix=".host-manifests-backup-", dir=package)
+    created = []  # the copies this run created
+    replaced = []  # the copies of earlier runs this run replaced
+    said = []  # the lines printed once the phase is committed
+    try:
+        for name in sorted(os.listdir(checkouts)) if os.path.isdir(checkouts) else []:
+            source = os.path.join(checkouts, name)
+            if not os.path.isdir(source) or not tests_host(source):
+                continue
+            call = direct.get(name.lower())
+            if not call:
+                said.append(f"{name}: its manifest tests the build host; left as is "
+                            "(a dependency of a dependency)")
+                continue
+            copy = os.path.join(copies, name)
+            os.makedirs(copies, exist_ok=True)
+            if os.path.exists(copy):
+                # The copy of an earlier run is copied aside, to be put back if
+                # this run refuses. It is not moved: SwiftPM leaves checkouts
+                # read-only, and renaming a 555 directory is refused (EPERM) on
+                # some filesystems, ZFS among them.
+                kept = os.path.join(backup, name)
+                shutil.copytree(copy, kept, symlinks=True)
+                replaced.append(copy)
+            else:
+                created.append(copy)
+            force_rmtree(copy)
+            shutil.copytree(source, copy, symlinks=True, ignore=shutil.ignore_patterns(".git"))
+            writable(copy)
+            lines = answer_as_mac(copy)
+            declare_by_path(package_swift, call, name)
+            said.append(f"{name}: {lines} host test(s) answered as on a Mac, "
+                        f"declared by path ({COPIES}/{name})")
+    except BaseException:
+        for copy in created:
+            force_rmtree(copy)
+        for copy in replaced:
+            force_rmtree(copy)
+            shutil.copytree(os.path.join(backup, os.path.basename(copy)), copy, symlinks=True)
+        with open(package_swift, "wb") as f:
+            f.write(manifest)
+        if not had_copies:
+            try:
+                os.rmdir(copies)
+            except OSError:
+                pass
+        raise
+    finally:
+        force_rmtree(backup)
+    for line in said:
+        print(line)
+    return len(created) + len(replaced)
+
+
+def run(package, resolve_fn=resolve):
     package = os.path.abspath(package)
     package_swift = os.path.join(package, "Package.swift")
     if not os.path.isfile(package_swift):
         sys.exit(f"host-manifests: no Package.swift in {package}")
-    resolve(package)
-    checkouts = os.path.join(package, ".build", "checkouts")
+    # The root manifest is read before the package is resolved: a dependency
+    # identity declared twice is refused before anything is written.
     direct = direct_urls(package_swift)
-    replaced = 0
-    for name in sorted(os.listdir(checkouts)) if os.path.isdir(checkouts) else []:
-        source = os.path.join(checkouts, name)
-        if not os.path.isdir(source) or not tests_host(source):
-            continue
-        call = direct.get(name.lower())
-        if not call:
-            print(f"{name}: its manifest tests the build host; left as is (a dependency of a dependency)")
-            continue
-        copy = os.path.join(package, COPIES, name)
-        shutil.rmtree(copy, ignore_errors=True)
-        shutil.copytree(source, copy, symlinks=True, ignore=shutil.ignore_patterns(".git"))
-        writable(copy)
-        lines = answer_as_mac(copy)
-        declare_by_path(package_swift, call, name)
-        print(f"{name}: {lines} host test(s) answered as on a Mac, declared by path ({COPIES}/{name})")
-        replaced += 1
-    if replaced:
-        resolve(package)
+    resolve_fn(package)
+    checkouts = os.path.join(package, ".build", "checkouts")
+    if rewrite(package, checkouts, direct):
+        resolve_fn(package)
     else:
         print("no direct dependency tests the build host")
 
@@ -248,6 +331,15 @@ def _exits(f, *args):
     except SystemExit:
         return True
     return False
+
+
+def _refusal(f, *args):
+    """The message of a refusal, or None when there was none."""
+    try:
+        f(*args)
+    except SystemExit as e:
+        return e.code
+    return None
 
 
 def self_test():
@@ -321,6 +413,50 @@ def self_test():
         main = open(os.path.join(lib, "Package.swift")).read()
         direct = direct_urls(pkg)
         declare_by_path(pkg, direct["rxswift"], "RxSwift")
+        # A refusal in the rewrite phase leaves the manifest and the copies as
+        # they were: Alpha is rewritten, then Beta is found twice and refused.
+        partial = os.path.join(root, "partial")
+        for name in ("Alpha", "Beta"):
+            checkout = os.path.join(partial, ".build", "checkouts", name)
+            os.makedirs(checkout)
+            with open(os.path.join(checkout, "Package.swift"), "w") as f:
+                f.write("#if os(macOS)\nlet x = 1\n#endif\n")
+        partial_pkg = os.path.join(partial, "Package.swift")
+        with open(partial_pkg, "w") as f:
+            f.write('let deps = [\n'
+                    '  .package(url: "https://github.com/a/Alpha.git", from: "1.0.0"),\n'
+                    '  .package(url: "https://github.com/b/Beta.git", from: "2.0.0"),\n'
+                    '  // .package(url: "https://github.com/b/Beta.git", from: "2.0.0"),\n'
+                    ']\n')
+        # A copy of an earlier run, which the refusal must put back as it was
+        old_copy = os.path.join(partial, COPIES, "Alpha")
+        os.makedirs(old_copy)
+        with open(os.path.join(old_copy, "Package.swift"), "w") as f:
+            f.write("#if true" + MARK + "\n")
+        # as SwiftPM leaves a checkout: read-only, and copytree keeps the modes
+        os.chmod(os.path.join(old_copy, "Package.swift"), 0o444)
+        os.chmod(old_copy, 0o555)
+        partial_before = open(partial_pkg, "rb").read()
+        old_copy_before = open(os.path.join(old_copy, "Package.swift"), "rb").read()
+        resolved = []
+        partial_refusal = _refusal(run, partial, lambda package: resolved.append(package))
+        partial_after = open(partial_pkg, "rb").read()
+        old_copy_after = open(os.path.join(old_copy, "Package.swift"), "rb").read()
+        # A dependency identity declared twice is refused before the package
+        # is resolved, so nothing is written at all.
+        duplicate = os.path.join(root, "duplicate")
+        os.makedirs(duplicate)
+        duplicate_pkg = os.path.join(duplicate, "Package.swift")
+        with open(duplicate_pkg, "w") as f:
+            f.write('#if os(iOS)\n'
+                    '.package(url: "https://example.test/first/Shared.git", from: "1.0.0")\n'
+                    '#else\n'
+                    '.package(url: "https://example.test/second/Shared.git", from: "2.0.0")\n'
+                    '#endif\n')
+        duplicate_before = open(duplicate_pkg, "rb").read()
+        resolved = []
+        duplicate_refusal = _refusal(run, duplicate, lambda package: resolved.append(package))
+        duplicate_after = open(duplicate_pkg, "rb").read()
         checks = [
             ("finds a host test", found),
             ("no host test left", not tests_host(lib)),
@@ -356,6 +492,15 @@ def self_test():
             ("multiline call replaced", f'    .package(path: "{COPIES}/Gamma"),\n' in one_line_text
              and "Gamma.git" not in one_line_text),
             ("path dependency kept", '.package(name: "Delta", path: "../Delta")' in one_line_text),
+            ("a later refusal leaves the manifest as it was", partial_after == partial_before),
+            ("a later refusal leaves the copies as they were",
+             old_copy_after == old_copy_before
+             and not os.path.exists(os.path.join(partial, COPIES, "Beta"))),
+            ("the refusal names the dependency", "Beta" in str(partial_refusal)),
+            ("a duplicate identity is refused", "shared" in str(duplicate_refusal)),
+            ("the refusal counts the declarations", "2 times" in str(duplicate_refusal)),
+            ("a duplicate identity is refused before anything is written",
+             duplicate_after == duplicate_before and not resolved),
         ]
         failed = [n for n, ok in checks if not ok]
         if failed:
@@ -364,7 +509,9 @@ def self_test():
     except BaseException:
         print(f"scratch dir kept: {root}")
         raise
-    shutil.rmtree(root)
+    # the restored old copy is read-only, as SwiftPM leaves checkouts, so the
+    # plain rmtree of the fixture root cannot remove it
+    force_rmtree(root)
 
 
 if __name__ == "__main__":
