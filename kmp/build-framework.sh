@@ -274,6 +274,8 @@ kmp_link() {
   local args=() line kind value
   local -A given=()
   while IFS=$'\t' read -r kind value; do
+    # The compiler adds its own platform klibs; Gradle's copies (listed on aarch64) would clash with them
+    [ "$kind" = LIBRARY ] && [[ "$value" == */klib/platform/* ]] && continue
     case "$kind" in
     INCLUDE | LIBRARY | EXPORT)
       [ -n "${given[$value]:-}" ] || args+=(-library "$value")
