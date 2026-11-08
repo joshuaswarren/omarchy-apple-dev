@@ -35,7 +35,7 @@ adds TestFlight and the App Store.
 | Tool | Version | Source |
 |------|---------|--------|
 | Swift | 6.4.1 in the latest fresh-install check | AUR `swift-bin` |
-| xtool | main before xtool-org/xtool#389 (`03fb48c`) + the 11 fork commits + xtool-org/xtool#430 and #422 (pin `c9f4363`, tag `omarchy-main-pre389-pin` of the fork) | built from source by the installer |
+| xtool | main (`a2875dd`, with xtool-org/xtool#375, #430, #422 and #432) + the 11 fork commits (pin `7cc56c3`, fork tag `omarchy-main-pin`) | built from source by the installer |
 | pymobiledevice3 | latest from PyPI at install time | venv |
 | cryptography | 42 or later; a dependency of pymobiledevice3, in the same venv. `tools/asc.py identity` and `test-identity` stop with a message naming the version if it is older | venv |
 | LLDB | bundled with the installed Swift toolchain | `swift-bin` |

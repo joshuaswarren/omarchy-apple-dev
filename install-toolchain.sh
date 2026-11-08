@@ -104,14 +104,14 @@ fetch_commit() { # repo sha dir
   fi
 }
 
-# xtool main at 03fb48c (after 1.24.0, so it carries the provider user-agent correction,
-# xtool-org/xtool#406, and the stdin fix, xtool-org/xtool#375) plus the packaging/build-server
-# fixes in #290-#293, #295 and #302, and the profile fix xtool-org/xtool#430 with #422. Not
-# later: main does not build in release since xtool-org/xtool#389 (xtool-org/xtool#431).
-# The fork tags it omarchy-main-pre389-pin, so the fetch does not depend on a pull request ref.
+# xtool main at a2875dd (after 1.24.0: the provider user-agent correction xtool-org/xtool#406,
+# the stdin fix #375, the profile fix #430, #422, and #432, which keeps the release build from
+# crashing the compiler since #389, xtool-org/xtool#431) plus the fork's own packaging/build-server
+# fixes, carried in the fork only (upstream #290-#293 and #295 are still open, #302 was closed
+# unmerged). Fork tag omarchy-main-pin, head of joshuaswarren/xtool#4.
 # Built from source with its Swift runtime libraries next to it ($ORIGIN only).
 XTOOL_REPO=https://github.com/joshuaswarren/xtool
-XTOOL_SHA=c9f436303f9fe4dbeef46dfb9e208f1bb0912fe4
+XTOOL_SHA=7cc56c391a67652e86d164eddbbd62065a26599f
 # The SDK stamp that pin writes (SDKBuilder.currentSDKVersion: epoch, darwin-tools and OpenAppleMacros
 # versions). Change it together with XTOOL_SHA; tests/sdk-state/check.sh compares it with the pinned source.
 XTOOL_SDK_VERSION="epoch=4,darwinTools=1.1.0,oam=1.4.1"
