@@ -136,16 +136,17 @@ kmp_arm64_home() {
   echo "$home"
 }
 
-# LLVM and libffi of the aarch64 release, which no JetBrains server hosts,
-# extracted into the compiler's data directory and marked there as extracted.
+# LLVM and libffi of the aarch64 release, which no JetBrains server hosts:
+# each archive is downloaded and checked first, then extracted into the
+# compiler's data directory and marked there as extracted.
 kmp_arm64_deps() {
   local deps="$1/dependencies" dep
   shift
   for dep in "$@"; do
     grep -qx "$dep" "$deps/.extracted" 2>/dev/null && [ -d "$deps/$dep" ] && continue
     log "$dep, from $KMP_ARM64_RELEASE (once)"
-    rm -rf "${deps:?}/$dep" || return 1
     kmp_fetch "$dep.tar.gz" "$deps/$dep.tar.gz" || return 1
+    rm -rf "${deps:?}/$dep" || return 1
     if ! tar -xzf "$deps/$dep.tar.gz" -C "$deps" || [ ! -d "$deps/$dep" ]; then
       rm -rf "${deps:?}/$dep" "$deps/$dep.tar.gz"
       err "$dep.tar.gz could not be extracted"
