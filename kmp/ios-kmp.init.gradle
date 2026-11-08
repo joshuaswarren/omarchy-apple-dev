@@ -30,9 +30,11 @@
 // Everything the task prints is read once here, at configuration time, as
 // plain serializable values: with the Gradle configuration cache on, the
 // task's action must not read the project model at run time (issue #150).
+// Read in projectsEvaluated, not afterEvaluate: a project that sets its
+// framework's settings in its own afterEvaluate is then still seen.
 
 allprojects { project ->
-    project.afterEvaluate {
+    project.gradle.projectsEvaluated {
         def kotlin = project.extensions.findByName('kotlin')
         if (kotlin == null || !kotlin.hasProperty('targets')) return
         def targetName = project.findProperty('omarchyKmpTarget') ?: 'iosArm64'
