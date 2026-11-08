@@ -7,8 +7,10 @@
 # Rows (expected results written before the code):
 #   1  shared folder:  exit 0, Assets.car written
 #   2  same asset in both catalogs: still refused (DuplicateEntry), exit != 0
+#   3  the folder provides a namespace in one catalog only: refused, exit != 0
 # Mutants (each must fail its row; checked by hand when the test was written):
 #   M1  copy the folder Contents.json unconditionally -> row 1
+#   M2  keep the first Contents.json without comparing properties -> row 3
 # usage: run.sh [actool]   default: tools/darwin-tools/.build/release/actool
 # Skipped (exit 0) when no actool is built.
 set -uo pipefail
@@ -54,6 +56,17 @@ if compile "$tmp/out2" "$tmp/Colors.xcassets" "$tmp/Other.xcassets" 2>/dev/null 
   fail=1
 else
   echo "ok   row 2: the same asset in two catalogs is still refused"
+fi
+
+# 3 the same folder, namespaced in one catalog only, is refused
+catalog "$tmp/Plain.xcassets" green
+echo '{"info":{"author":"xcode","version":1}}' >"$tmp/Plain.xcassets/Wfp/Contents.json"
+if compile "$tmp/out3" "$tmp/Colors.xcassets" "$tmp/Plain.xcassets" 2>/dev/null ||
+  ! grep -q 'Wfp is a folder in more than one asset catalog with different properties' "$tmp/out3/log"; then
+  echo "FAIL row 3: folders with different properties were merged, or refused for another reason"
+  fail=1
+else
+  echo "ok   row 3: a folder with different properties in two catalogs is refused"
 fi
 
 [ "$fail" = 0 ] && echo "actool-shared-folder: all rows passed" || echo "actool-shared-folder: FAILED"
