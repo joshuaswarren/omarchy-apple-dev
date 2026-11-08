@@ -106,8 +106,9 @@ fetch_commit() { # repo sha dir
 
 # xtool main at a2875dd (after 1.24.0: the provider user-agent correction xtool-org/xtool#406,
 # the stdin fix #375, the profile fix #430, #422, and #432, which keeps the release build from
-# crashing the compiler since #389, xtool-org/xtool#431) plus the packaging/build-server fixes
-# in #290-#293, #295 and #302. Head of joshuaswarren/xtool#4.
+# crashing the compiler since #389, xtool-org/xtool#431) plus the fork's own packaging/build-server
+# fixes, carried in the fork only (upstream #290-#293 and #295 are still open, #302 was closed
+# unmerged). Fork tag omarchy-main-pin, head of joshuaswarren/xtool#4.
 # Built from source with its Swift runtime libraries next to it ($ORIGIN only).
 XTOOL_REPO=https://github.com/joshuaswarren/xtool
 XTOOL_SHA=7cc56c391a67652e86d164eddbbd62065a26599f
