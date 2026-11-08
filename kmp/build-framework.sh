@@ -285,6 +285,7 @@ kmp_link() {
     EXPORT) args+=("-Xexport-library=$value") ;;
     ARG) args+=("$value") ;;
     LINKER) args+=(-linker-option "$value") ;;
+    BINOPT) args+=("-Xbinary=$value") ;;
     esac
   done <<<"$block"
   [ "$static" = true ] && [ "$dynamic" != true ] && args+=(-Xstatic-framework)
@@ -332,8 +333,7 @@ kmp_main() {
     return 2
   }
   [ -x "$dir/gradlew" ] || { err "$dir has no gradlew: give the root of a Gradle build"; return 1; }
-  # The project's configuration cache would refuse the init script's task (it reads the model at run time).
-  local gradle_args=(--no-configuration-cache)
+  local gradle_args=()
   case "$KMP_HOST" in
   x86_64) ;;
   aarch64)

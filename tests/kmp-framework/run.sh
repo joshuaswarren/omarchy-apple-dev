@@ -15,14 +15,17 @@
 #   4  resources missing:     kmp_link fails, "framework:" is not reported
 #   5  packaging fails:       kmp_link --xcframework fails, no xcframework left
 #   6  device xcframework:    slice ios-arm64, no platform variant
-#   7  simulator xcframework: slice ios-arm64-simulator, variant simulator,
+#   7 simulator xcframework: slice ios-arm64-simulator, variant simulator,
 #                             linked against the simulator SDK
-#   8  aarch64 distribution:  a checksum mismatch fails, nothing cached; a
+#   8 framework binary options: BINOPT dump lines reach the compiler as
+#                             -Xbinary=key=value (issue #150)
+#   9  aarch64 distribution:  a checksum mismatch fails, nothing cached; a
 #                             matching archive is cached and reused
 # Mutants (each must fail its row):
 #   M1  drop `|| return 1` after kmp_distribution -> row 1 goes on to the link
 #   M2  drop the cp check of the Compose resources -> row 4 succeeds
 #   M3  always write ios-arm64 -> row 7
+#   M4  drop the BINOPT case in kmp_link -> row 8
 # usage: run.sh [path-to-build-framework.sh]   default: ../../kmp/build-framework.sh
 set -uo pipefail
 here=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
@@ -47,6 +50,7 @@ while [ "$#" -gt 0 ]; do
   -o) out="$2"; shift ;;
   -target) target="$2"; shift ;;
   -Xoverride-konan-properties=*) sysroot="$1" ;;
+  -Xbinary=*) echo "$1" >>"$KMP_TEST_LOG/binary" ;;
   esac
   shift
 done
@@ -92,9 +96,10 @@ mkdir -p "$KMP_TEST_LOG" "$tmp/res/composeResources"
 source "$SCRIPT"
 set +e
 
-block() { # $1: build dir, $2: resources dir or empty
+block() { # $1: build dir, $2: resources dir or empty, $3: extra dump lines or empty
   printf 'VERSION\t%s\nFRAMEWORK\t:shared\t%s\tShared\tfalse\n' "$V" "$1"
   [ -z "$2" ] || printf 'RESOURCES\t%s\n' "$2"
+  [ -z "${3:-}" ] || printf '%b\n' "$3"
 }
 reset_logs() { rm -f "$KMP_TEST_LOG"/*; }
 dist="$tmp/cache/omarchy-apple-dev/kmp/kotlin-native-$V"
@@ -170,7 +175,15 @@ if kmp_link "$(block "$tmp/b7" "")" ios_simulator_arm64 "" true >/dev/null 2>&1 
   ok "row 7: simulator xcframework, slice ios-arm64-simulator, variant simulator, simulator SDK"
 else bad "row 7: simulator xcframework metadata: ${libs:-none}"; fi
 
-# 8 aarch64 distribution, checked against SHA256SUMS
+# 8 framework binary options reach the compiler (-Xbinary, issue #150)
+reset_logs
+if kmp_link "$(block "$tmp/b8" "" 'BINOPT\tbundleId=app.repro.bundle\nBINOPT\tbundleShortVersionString=3.14')" ios_arm64 "" true >/dev/null 2>&1 &&
+  grep -qxe "-Xbinary=bundleId=app.repro.bundle" "$KMP_TEST_LOG/binary" &&
+  grep -qxe "-Xbinary=bundleShortVersionString=3.14" "$KMP_TEST_LOG/binary"; then
+  ok "row 8: BINOPT lines reach the compiler as -Xbinary=key=value"
+else bad "row 8: framework binary options did not reach the compiler"; fi
+
+# 9 aarch64 distribution, checked against SHA256SUMS
 a64=kotlin-native-prebuilt-linux-aarch64-$V
 mkdir -p "$tmp/a64/$a64/bin" && printf '#!/bin/sh\n' >"$tmp/a64/$a64/bin/kotlinc-native" && chmod +x "$tmp/a64/$a64/bin/kotlinc-native"
 tar -czf "$tmp/archives/a64.tgz" -C "$tmp/a64" "$a64"
@@ -178,11 +191,11 @@ echo "0000000000000000000000000000000000000000000000000000000000000000  $a64.tar
 echo "$(sha256sum <"$tmp/archives/a64.tgz" | cut -d' ' -f1)  $a64.tar.gz" >"$tmp/sums.good"
 home64="$tmp/cache/omarchy-apple-dev/kmp/$a64"
 if KMP_TEST_ARCHIVE="$tmp/archives/a64.tgz" KMP_TEST_SUMS="$tmp/sums.bad" kmp_arm64_home >/dev/null 2>&1 || [ -e "$home64" ]; then
-  bad "row 8: a checksum mismatch was accepted or cached"
+  bad "row 9: a checksum mismatch was accepted or cached"
 elif [ "$(KMP_TEST_ARCHIVE="$tmp/archives/a64.tgz" KMP_TEST_SUMS="$tmp/sums.good" kmp_arm64_home 2>/dev/null)" != "$home64" ] ||
   [ ! -f "$home64/.omarchy-kmp-complete" ] || [ "$(KMP_TEST_ARCHIVE="" kmp_arm64_home 2>/dev/null)" != "$home64" ]; then
-  bad "row 8: the checked distribution was not cached or not reused"
-else ok "row 8: aarch64 distribution checked against SHA256SUMS, cached, reused"; fi
+  bad "row 9: the checked distribution was not cached or not reused"
+else ok "row 9: aarch64 distribution checked against SHA256SUMS, cached, reused"; fi
 
 [ "$fail" = 0 ] && echo "kmp-framework: all rows passed" || echo "kmp-framework: FAILED"
 exit "$fail"
