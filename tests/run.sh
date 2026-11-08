@@ -78,6 +78,8 @@ echo "== tests/kmp-framework/run.sh"
 bash tests/kmp-framework/run.sh || fail=1
 echo "== tests/actool-shared-folder/run.sh"
 bash tests/actool-shared-folder/run.sh || fail=1
+echo "== tests/actool-single-scale/run.sh"
+bash tests/actool-single-scale/run.sh || fail=1
 
 echo "== tests/flutter-ship/run.sh"
 bash tests/flutter-ship/run.sh || fail=1
