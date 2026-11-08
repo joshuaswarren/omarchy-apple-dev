@@ -10,6 +10,11 @@ public enum CatalogMerge {
         public var description: String { "\(name) is defined in more than one asset catalog" }
     }
 
+    public struct FolderConflict: Error, CustomStringConvertible {
+        public let name: String
+        public var description: String { "\(name) is a folder in more than one asset catalog with different properties" }
+    }
+
     public struct Prepared {
         /// The merged catalog, inside its own temporary directory.
         public let catalog: URL
@@ -92,8 +97,15 @@ public enum CatalogMerge {
                 case "" where isDir:
                     try fm.createDirectory(at: target, withIntermediateDirectories: true)
                     let folderContents = child.appendingPathComponent("Contents.json")
+                    let targetContents = target.appendingPathComponent("Contents.json")
+                    // A folder of the same name in two catalogs merges, as in Apple's actool: the first Contents.json stays.
+                    // Different properties (provides-namespace) would change what one catalog meant: refused.
                     if fm.fileExists(atPath: folderContents.path) {
-                        try fm.copyItem(at: folderContents, to: target.appendingPathComponent("Contents.json"))
+                        if !fm.fileExists(atPath: targetContents.path) {
+                            try fm.copyItem(at: folderContents, to: targetContents)
+                        } else if folderProperties(folderContents) != folderProperties(targetContents) {
+                            throw FolderConflict(name: child.lastPathComponent)
+                        }
                     }
                     try copy(child, into: target, catalog: catalog)
                 default:
@@ -105,6 +117,14 @@ public enum CatalogMerge {
         func place(_ source: URL, at target: URL) throws {
             guard !fm.fileExists(atPath: target.path) else { throw DuplicateEntry(name: target.lastPathComponent) }
             try fm.copyItem(at: source, to: target)
+        }
+
+        /// A folder Contents.json's "properties", empty when it has none.
+        func folderProperties(_ contents: URL) -> NSDictionary {
+            guard let data = try? Data(contentsOf: contents),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let properties = json["properties"] as? [String: Any] else { return [:] }
+            return properties as NSDictionary
         }
 
         /// The first source file extension AssetKit cannot read (it reads PNG, JPEG, SVG and PDF).
