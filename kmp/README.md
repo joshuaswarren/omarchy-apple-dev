@@ -20,7 +20,8 @@ told it runs on x86_64 (the Kotlin plugin turns native targets off on aarch64).
 That build's Kotlin version (`KMP_ARM64_VERSION`, 2.4.21; `KMP_ARM64_RELEASE`
 for another release) compiles and links, whatever the project's plugin version.
 Verified 2026-11-08 on aarch64 (Arch, iPhoneOS 27.0 SDK): a static framework of
-a project on Kotlin 2.4.20 linked; the app around it was not run.
+a project on Kotlin 2.4.21 linked, and the app around it built with
+`xtool dev build`; it was not run on a device.
 
 ## Use
 
