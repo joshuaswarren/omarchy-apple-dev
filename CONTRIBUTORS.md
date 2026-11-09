@@ -4,6 +4,7 @@
 
 - [@17xande](https://github.com/17xande)
 - [@AbdurahmanAlmehdi](https://github.com/AbdurahmanAlmehdi)
+- [@c4software](https://github.com/c4software)
 - [@coolswood](https://github.com/coolswood)
 - [@DavidSnoble](https://github.com/DavidSnoble)
 - [@DerrickDW](https://github.com/DerrickDW)
@@ -12,8 +13,10 @@
 - [@imatrixcz](https://github.com/imatrixcz)
 - [@lacion](https://github.com/lacion)
 - [@m9tdev](https://github.com/m9tdev)
+- [@marcostorto](https://github.com/marcostorto)
 - [@rynalde](https://github.com/rynalde)
 - [@sharmis-tp](https://github.com/sharmis-tp)
+- [@vintoware](https://github.com/vintoware)
 
 _Linked GitHub accounts only. Anonymous (unlinked) commit authors are
 enumerable through the API (anon=true) but are identified there only by
