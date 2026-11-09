@@ -261,6 +261,18 @@ id, creates an Apple Distribution certificate (the private key stays in
 with `rcodesign`, validates the `.ipa` offline (any `FAIL` stops it), uploads
 and prints Apple's processing result. It never submits a build for review.
 
+The console steps that remain after the upload are available as an opt-in
+command, `tools/asc.py publish IPA|APP NOTES_JSON` (same key variables;
+`ship.sh` itself stays as it is). Point `NOTES_JSON` at a Play-style
+`release_notes.json` (`[{"language": "en-US", "text": ...}]`, the same file
+Google Play takes): `publish` finds the App Store version for the bundle's
+version string (creates it when missing), attaches the uploaded build once
+TestFlight shows it `VALID` and fills "What's New" in every store locale
+(locales are mapped: `he` → `iw`, `zh-Hans` → `zh-CN`, base language, then
+`en-US`; emoji are stripped, App Review rejects them). Like `ship.sh` itself,
+it never submits a build for review — after "What's New" it stops and says
+submission is a manual step. Re-runs change nothing that is already done.
+
 Without a key it signs with a local TEST identity. That proves the pipeline
 only; Apple rejects the signature.
 
