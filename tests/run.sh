@@ -84,6 +84,9 @@ bash tests/actool-single-scale/run.sh || fail=1
 echo "== tests/flutter-ship/run.sh"
 bash tests/flutter-ship/run.sh || fail=1
 
+echo "== tests/device-run-app-icon/run.sh"
+bash tests/device-run-app-icon/run.sh || fail=1
+
 echo "== tests/device-run-console/run.sh"
 bash tests/device-run-console/run.sh || fail=1
 
