@@ -33,6 +33,12 @@
 // Read in projectsEvaluated, not afterEvaluate: a project that sets its
 // framework's settings in its own afterEvaluate is then still seen.
 
+// Linux aarch64 (-PomarchyKmpHostArch=amd64, in a fresh JVM): the Kotlin
+// plugin turns every native target off on that host, so it is told x86_64
+// before it loads; kotlin.native.home gives it the aarch64 compiler.
+def hostArch = gradle.startParameter.projectProperties['omarchyKmpHostArch']
+if (hostArch) System.setProperty('os.arch', hostArch)
+
 allprojects { project ->
     project.gradle.projectsEvaluated {
         def kotlin = project.extensions.findByName('kotlin')
