@@ -32,8 +32,8 @@
 # Linux aarch64: JetBrains ships no Kotlin/Native for this host, and the
 # Kotlin Gradle plugin turns every native target off on it. An unofficial
 # aarch64 build (voize-gmbh/kotlin, KMP_ARM64_RELEASE) stands in: its
-# distribution, LLVM and libffi are downloaded and checked against the
-# release's SHA256SUMS; Gradle is told it runs on x86_64 (os.arch, set by
+# distribution, LLVM and libffi are downloaded and checked against SHA-256
+# digests pinned in this script (KMP_ARM64_PINNED); Gradle is told it runs on x86_64 (os.arch, set by
 # ios-kmp.init.gradle in a fresh JVM, so --no-daemon) and builds the klibs with
 # that distribution (kotlin.native.home); the link then runs it as on x86_64,
 # with the aarch64 LLVM and libffi. Its Kotlin version (KMP_ARM64_VERSION) is
@@ -93,18 +93,35 @@ kmp_platform() {
   esac
 }
 
-# One file of the aarch64 release into $2, checked against its SHA256SUMS.
+# SHA-256 of the aarch64 release files, pinned here: the release is mutable
+# (its assets and SHA256SUMS can be replaced together), so its own SHA256SUMS
+# proves integrity, not provenance. KMP_ARM64_SUMS, a SHA256SUMS file you
+# trust, replaces this table (for another KMP_ARM64_VERSION).
+KMP_ARM64_PINNED="2.4.21:
+e7dfc692c1e0b1d0ad9ada67031a67b0544974ba77220445c21efc7949281ea3  kotlin-native-prebuilt-linux-aarch64-2.4.21.tar.gz
+35e9a2566bf7cb44de427669d010117e98148ca5ea1a4ffef291218581d376a9  llvm-21-aarch64-linux-essentials-1.tar.gz
+ad212a7541b98ed2a4ebb3b510f4cdebf2919b8b0cc9dd5a321558a5f4282b13  libffi-3.4.6-1-linux-aarch64.tar.gz"
+
+# One file of the aarch64 release into $2, checked against its pinned SHA-256.
 kmp_fetch() {
-  local file="$1" dest="$2" sum
-  sum="$(curl -fsSL "$KMP_ARM64_RELEASE/SHA256SUMS" | awk -v f="$file" '$2 == f { print $1 }')" || sum=""
+  local file="$1" dest="$2" sums sum
+  if [ -n "${KMP_ARM64_SUMS:-}" ]; then
+    sums="$(cat "$KMP_ARM64_SUMS")" || return 1
+  elif [ "${KMP_ARM64_PINNED%%:*}" = "$KMP_ARM64_VERSION" ]; then
+    sums="${KMP_ARM64_PINNED#*:}"
+  else
+    err "no pinned checksums for Kotlin/Native $KMP_ARM64_VERSION: set KMP_ARM64_SUMS to a SHA256SUMS file you trust"
+    return 1
+  fi
+  sum="$(awk -v f="$file" '$2 == f { print $1 }' <<<"$sums")"
   if [ -z "$sum" ]; then
-    err "no checksum for $file in $KMP_ARM64_RELEASE/SHA256SUMS"
+    err "no pinned checksum for $file"
     return 1
   fi
   if ! curl -fL --progress-bar -o "$dest" "$KMP_ARM64_RELEASE/$file" >&2 ||
     ! echo "$sum  $dest" | sha256sum -c --quiet - >&2; then
     rm -f "$dest"
-    err "download of $file failed or does not match its checksum: $KMP_ARM64_RELEASE"
+    err "download of $file failed or does not match its pinned checksum: $KMP_ARM64_RELEASE"
     return 1
   fi
 }

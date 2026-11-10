@@ -187,19 +187,19 @@ if kmp_link "$(block "$tmp/b8" "" 'BINOPT\tbundleId=app.repro.bundle\nBINOPT\tbu
   ok "row 8: BINOPT lines reach the compiler as -Xbinary=key=value"
 else bad "row 8: framework binary options did not reach the compiler"; fi
 
-# 9 aarch64 distribution, checked against SHA256SUMS
+# 9 aarch64 distribution, checked against a trusted SHA256SUMS (KMP_ARM64_SUMS)
 a64=kotlin-native-prebuilt-linux-aarch64-$V
 mkdir -p "$tmp/a64/$a64/bin" && printf '#!/bin/sh\n' >"$tmp/a64/$a64/bin/kotlinc-native" && chmod +x "$tmp/a64/$a64/bin/kotlinc-native"
 tar -czf "$tmp/archives/a64.tgz" -C "$tmp/a64" "$a64"
 echo "0000000000000000000000000000000000000000000000000000000000000000  $a64.tar.gz" >"$tmp/sums.bad"
 echo "$(sha256sum <"$tmp/archives/a64.tgz" | cut -d' ' -f1)  $a64.tar.gz" >"$tmp/sums.good"
 home64="$tmp/cache/omarchy-apple-dev/kmp/$a64"
-if KMP_TEST_ARCHIVE="$tmp/archives/a64.tgz" KMP_TEST_SUMS="$tmp/sums.bad" kmp_arm64_home >/dev/null 2>&1 || [ -e "$home64" ]; then
+if KMP_TEST_ARCHIVE="$tmp/archives/a64.tgz" KMP_ARM64_SUMS="$tmp/sums.bad" kmp_arm64_home >/dev/null 2>&1 || [ -e "$home64" ]; then
   bad "row 9: a checksum mismatch was accepted or cached"
-elif [ "$(KMP_TEST_ARCHIVE="$tmp/archives/a64.tgz" KMP_TEST_SUMS="$tmp/sums.good" kmp_arm64_home 2>/dev/null)" != "$home64" ] ||
+elif [ "$(KMP_TEST_ARCHIVE="$tmp/archives/a64.tgz" KMP_ARM64_SUMS="$tmp/sums.good" kmp_arm64_home 2>/dev/null)" != "$home64" ] ||
   [ ! -f "$home64/.omarchy-kmp-complete" ] || [ "$(KMP_TEST_ARCHIVE="" kmp_arm64_home 2>/dev/null)" != "$home64" ]; then
   bad "row 9: the checked distribution was not cached or not reused"
-else ok "row 9: aarch64 distribution checked against SHA256SUMS, cached, reused"; fi
+else ok "row 9: aarch64 distribution checked against KMP_ARM64_SUMS, cached, reused"; fi
 
 # 10 platform klibs from Gradle's dump are left to the compiler
 reset_logs
@@ -207,6 +207,22 @@ if kmp_link "$(block "$tmp/b10" "" 'LIBRARY\t/k/klib/platform/ios_arm64/org.jetb
   grep -qx /deps/markdown.klib "$KMP_TEST_LOG/library" && ! grep -q /klib/platform/ "$KMP_TEST_LOG/library"; then
   ok "row 10: platform klibs left to the compiler, other libraries passed"
 else bad "row 10: platform klibs passed to the compiler, or a library dropped"; fi
+
+# 11 a replaced release: its SHA256SUMS agrees with the tampered archive, the pinned digest does not
+t64=kotlin-native-prebuilt-linux-aarch64-2.4.21
+mkdir -p "$tmp/t64/$t64/bin" && printf '#!/bin/sh\n' >"$tmp/t64/$t64/bin/kotlinc-native" && chmod +x "$tmp/t64/$t64/bin/kotlinc-native"
+tar -czf "$tmp/archives/t64.tgz" -C "$tmp/t64" "$t64"
+echo "$(sha256sum <"$tmp/archives/t64.tgz" | cut -d' ' -f1)  $t64.tar.gz" >"$tmp/sums.tampered"
+if KMP_ARM64_VERSION=2.4.21 KMP_TEST_ARCHIVE="$tmp/archives/t64.tgz" KMP_TEST_SUMS="$tmp/sums.tampered" kmp_arm64_home >/dev/null 2>&1 ||
+  [ -e "$tmp/cache/omarchy-apple-dev/kmp/$t64" ]; then
+  bad "row 11: a tampered archive with a matching release SHA256SUMS was accepted"
+else ok "row 11: the pinned digest refuses a tampered archive the release's SHA256SUMS vouches for"; fi
+
+# 12 a version with no pinned digests and no KMP_ARM64_SUMS fails, naming the variable
+if out=$(KMP_TEST_ARCHIVE="$tmp/archives/a64.tgz" KMP_TEST_SUMS="$tmp/sums.good" kmp_fetch "$a64.tar.gz" "$tmp/x.tgz" 2>&1) ||
+  [ -e "$tmp/x.tgz" ] || ! grep -q KMP_ARM64_SUMS <<<"$out"; then
+  bad "row 12: an unpinned version was fetched, or the message does not name KMP_ARM64_SUMS: $out"
+else ok "row 12: an unpinned version fails closed and names KMP_ARM64_SUMS"; fi
 
 [ "$fail" = 0 ] && echo "kmp-framework: all rows passed" || echo "kmp-framework: FAILED"
 exit "$fail"

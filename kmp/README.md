@@ -14,11 +14,12 @@ iPhone 11 Pro under iOS 27.
 
 On Linux aarch64, for which JetBrains ships no Kotlin/Native, the script takes
 the unofficial aarch64 build of [voize-gmbh/kotlin](https://github.com/voize-gmbh/kotlin/releases/tag/v2.4.21-linux-arm64)
-(its distribution, LLVM and libffi, checked against the release's SHA256SUMS,
-kept in `~/.cache/omarchy-apple-dev/kmp`), and Gradle builds the klibs with it,
+(its distribution, LLVM and libffi, checked against SHA-256 digests pinned in
+the script, since the release can be replaced; kept in `~/.cache/omarchy-apple-dev/kmp`), and Gradle builds the klibs with it,
 told it runs on x86_64 (the Kotlin plugin turns native targets off on aarch64).
 That build's Kotlin version (`KMP_ARM64_VERSION`, 2.4.21; `KMP_ARM64_RELEASE`
-for another release) compiles and links, whatever the project's plugin version.
+and `KMP_ARM64_SUMS`, a SHA256SUMS file you trust, for another release)
+compiles and links, whatever the project's plugin version.
 Verified 2026-11-08 on aarch64 (Arch, iPhoneOS 27.0 SDK): a static framework of
 a project on Kotlin 2.4.21 linked, and the app around it built with
 `xtool dev build` and was run on a device by hand.
