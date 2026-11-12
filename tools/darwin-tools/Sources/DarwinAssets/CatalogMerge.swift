@@ -10,6 +10,11 @@ public enum CatalogMerge {
         public var description: String { "\(name) is defined in more than one asset catalog" }
     }
 
+    public struct FolderConflict: Error, CustomStringConvertible {
+        public let name: String
+        public var description: String { "\(name) is a folder in more than one asset catalog with different properties" }
+    }
+
     public struct Prepared {
         /// The merged catalog, inside its own temporary directory.
         public let catalog: URL
@@ -61,6 +66,7 @@ public enum CatalogMerge {
                         skipped.append("\(where_): .\(format) images are not supported by AssetKit")
                     } else {
                         try place(child, at: target)
+                        try keyBitmapsAtOneX(target)
                     }
                 case "colorset":
                     if try !copyColorSet(child, to: target) {
@@ -92,8 +98,15 @@ public enum CatalogMerge {
                 case "" where isDir:
                     try fm.createDirectory(at: target, withIntermediateDirectories: true)
                     let folderContents = child.appendingPathComponent("Contents.json")
+                    let targetContents = target.appendingPathComponent("Contents.json")
+                    // A folder of the same name in two catalogs merges, as in Apple's actool: the first Contents.json stays.
+                    // Different properties (provides-namespace) would change what one catalog meant: refused.
                     if fm.fileExists(atPath: folderContents.path) {
-                        try fm.copyItem(at: folderContents, to: target.appendingPathComponent("Contents.json"))
+                        if !fm.fileExists(atPath: targetContents.path) {
+                            try fm.copyItem(at: folderContents, to: targetContents)
+                        } else if folderProperties(folderContents) != folderProperties(targetContents) {
+                            throw FolderConflict(name: child.lastPathComponent)
+                        }
                     }
                     try copy(child, into: target, catalog: catalog)
                 default:
@@ -107,6 +120,14 @@ public enum CatalogMerge {
             try fm.copyItem(at: source, to: target)
         }
 
+        /// A folder Contents.json's "properties", empty when it has none.
+        func folderProperties(_ contents: URL) -> NSDictionary {
+            guard let data = try? Data(contentsOf: contents),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let properties = json["properties"] as? [String: Any] else { return [:] }
+            return properties as NSDictionary
+        }
+
         /// The first source file extension AssetKit cannot read (it reads PNG, JPEG, SVG and PDF).
         func unsupportedImageFormat(_ imageSet: URL) -> String? {
             guard let data = try? Data(contentsOf: imageSet.appendingPathComponent("Contents.json")),
@@ -115,6 +136,25 @@ public enum CatalogMerge {
             return images.compactMap { ($0["filename"] as? String).map { URL(fileURLWithPath: $0).pathExtension.lowercased() } }
                 // HEIC/HEIF decode through libheif's heif-convert.
                 .first { !["png", "jpg", "jpeg", "svg", "pdf", "heic", "heif"].contains($0) }
+        }
+
+        /// A bitmap entry with no scale (Xcode's "Single Scale" set) gets "1x", as Apple's actool keys it: AssetKit
+        /// keys it at scale 0, which UIKit never matches ("No image named ..."). Vector sources stay scale-free.
+        func keyBitmapsAtOneX(_ imageSet: URL) throws {
+            let url = imageSet.appendingPathComponent("Contents.json")
+            guard var contents = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any],
+                  var images = contents["images"] as? [[String: Any]] else { return }
+            var changed = false
+            for i in images.indices where images[i]["scale"] == nil {
+                guard let name = images[i]["filename"] as? String,
+                      ["png", "jpg", "jpeg", "heic", "heif"].contains(URL(fileURLWithPath: name).pathExtension.lowercased())
+                else { continue }
+                images[i]["scale"] = "1x"
+                changed = true
+            }
+            guard changed else { return }
+            contents["images"] = images
+            try JSONSerialization.data(withJSONObject: contents).write(to: url)
         }
 
         /// Copies a colorset without its color-less entries (Xcode's empty AccentColor placeholder).

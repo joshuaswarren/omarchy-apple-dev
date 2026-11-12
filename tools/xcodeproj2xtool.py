@@ -2,6 +2,7 @@
 """Generate an xtool adapter package from an Xcode project.
 
     xcodeproj2xtool.py <path/to/App.xcodeproj> [--target NAME] [--out DIR]
+                       [--configuration NAME]
 
 Reads project.pbxproj (OpenStep plist, small stdlib parser) plus the target's
 xcconfig files, and writes an adapter directory (default <project root>/omarchy-xtool):
@@ -34,6 +35,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import unicodedata
 import xml.etree.ElementTree as ET
 
 # ---------------------------------------------------------------- pbxproj parser
@@ -308,8 +310,182 @@ def sw_sy(v):
     return json.dumps(v)  # Swift string literals and JSON strings agree here
 
 
+# Members the SDK already has: Xcode leaves an asset of that name out of the
+# shortcuts it generates, so as not to hide them.
+SDK_MEMBERS = {
+    "Color": {"accentColor", "black", "blue", "brown", "clear", "cyan", "gray", "green", "indigo",
+              "mint", "orange", "pink", "primary", "purple", "red", "secondary", "teal", "white",
+              "yellow"},
+    "UIColor": {"black", "blue", "brown", "clear", "cyan", "darkGray", "darkText", "gray", "green",
+                "label", "lightGray", "lightText", "link", "magenta", "orange", "placeholderText",
+                "purple", "red", "separator", "tintColor", "white", "yellow"},
+    "NSColor": {"black", "blue", "brown", "clear", "cyan", "darkGray", "gray", "green", "labelColor",
+                "lightGray", "magenta", "orange", "purple", "red", "white", "yellow"},
+    "Image": set(),
+    "UIImage": {"actions", "add", "checkmark", "remove", "strokedCheckmark"},
+    "NSImage": set(),
+}
+
+
+def _swift_characters(text):
+    """Text split into approximate Swift Characters: a code point with the
+    combining marks that follow it. Format characters (Cf, such as the zero
+    width joiner, whose clustering depends on emoji sequences) are refused
+    before this is used."""
+    chars = []
+    for c in text:
+        if chars and unicodedata.category(c).startswith("M"):
+            chars[-1] += c
+        else:
+            chars.append(c)
+    return chars
+
+
+# Symbols with the Alphabetic property (Other_Alphabetic), which str.isalpha
+# does not see: circled, parenthesized-squared and negative squared letters.
+_OTHER_ALPHABETIC_SYMBOLS = ((0x24B6, 0x24E9), (0x1F130, 0x1F149), (0x1F150, 0x1F169),
+                             (0x1F170, 0x1F189))
+
+
+def _swift_is_letter_or_number(char):
+    """Character.isLetter || Character.isNumber: the properties of its first
+    code point (Alphabetic, Numeric_Type)."""
+    first = char[0]
+    return (first.isalpha() or first.isnumeric() or unicodedata.category(first) == "Nl"
+            or any(lo <= ord(first) <= hi for lo, hi in _OTHER_ALPHABETIC_SYMBOLS))
+
+
+def asset_symbol_name(name):
+    """The name actool gives an asset's symbol, as AssetSymbols.swiftName in
+    tools/darwin-tools: "brand-blue" -> brandBlue, "URL" -> url,
+    "Icons/Star" -> iconsStar, "Café" -> café. Words are the runs of Unicode
+    letters and numbers, as Swift's Character.isLetter and isNumber see them.
+    Raises ValueError for a name whose mapping unicodedata cannot tell."""
+    chars = _swift_characters(name)
+    unsure = [c for c in name if unicodedata.category(c) in ("Cn", "Cf")]
+    if chars and unicodedata.category(chars[0][0]) in ("Mn", "Mc"):
+        unsure.insert(0, chars[0][0])
+    if unsure:
+        # Swift reads the Alphabetic property of these, which unicodedata does
+        # not carry (a leading combining mark: Other_Alphabetic) or does not
+        # know (a code point newer than its Unicode version): no guess.
+        raise ValueError(f"asset {name!r}: cannot tell the name actool gives it "
+                         f"(U+{ord(unsure[0]):04X}: a leading combining mark, a format character such as "
+                         f"U+200D, or a code point unicodedata {unicodedata.unidata_version} does "
+                         "not know); rename it, "
+                         "or convert with ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = NO")
+    parts, word = [], []
+    for char in chars:
+        if _swift_is_letter_or_number(char):
+            word.append(char)
+        elif word:
+            parts.append(word)
+            word = []
+    if word:
+        parts.append(word)
+    if not parts:
+        return "_"
+    first = "".join(parts[0])
+    if first == first.upper():
+        head = first.lower()
+    else:
+        head = parts[0][0].lower() + "".join(parts[0][1:])
+    out = head + "".join(p[0].upper() + "".join(p[1:]) for p in parts[1:])
+    return "_" + out if _swift_characters(out)[0][0].isnumeric() else out
+
+
+def asset_catalog_names(catalog):
+    """(name, is_color) of every color set and image set of a catalog, with the
+    folder namespaces actool uses (provides-namespace)."""
+    found = []
+
+    def namespaced(folder):
+        try:
+            with open(os.path.join(folder, "Contents.json")) as f:
+                return bool(json.load(f).get("properties", {}).get("provides-namespace"))
+        except (OSError, ValueError):
+            return False
+
+    def walk(folder, prefix):
+        for child in sorted(os.listdir(folder)):
+            path = os.path.join(folder, child)
+            base, ext = os.path.splitext(child)
+            if ext == ".colorset":
+                found.append((prefix + base, True))
+            elif ext == ".imageset":
+                found.append((prefix + base, False))
+            elif ext == "" and os.path.isdir(path):
+                walk(path, prefix + (base + "/" if namespaced(path) else ""))
+
+    walk(catalog, "")
+    return found
+
+
+# Swift keywords that a member declaration must escape (`default`); used
+# after a dot, they are escaped there too. Contextual keywords need nothing.
+SWIFT_KEYWORDS = {
+    "associatedtype", "class", "deinit", "enum", "extension", "fileprivate", "func", "import",
+    "init", "inout", "internal", "let", "open", "operator", "private", "precedencegroup",
+    "protocol", "public", "rethrows", "static", "struct", "subscript", "typealias", "var",
+    "break", "case", "catch", "continue", "default", "defer", "do", "else", "fallthrough", "for",
+    "guard", "if", "in", "repeat", "return", "throw", "switch", "where", "while", "Any", "as",
+    "await", "false", "is", "nil", "self", "Self", "super", "throws", "true", "try",
+}
+
+
+def swift_member(name):
+    """A symbol name as a member declaration and reference: keywords in
+    backticks. `_`, and Type / Protocol (X.Type is always the metatype, even
+    escaped) cannot name a member: refused."""
+    if name == "_" or name in ("Type", "Protocol"):
+        raise ValueError(f"symbol name {name!r} cannot be a Swift member")
+    return f"`{name}`" if name in SWIFT_KEYWORDS else name
+
+
+def asset_symbol_extensions(assets, platform):
+    """Swift source of the asset symbol extensions for (name, is_color) assets.
+    Raises ValueError for an asset whose symbol name cannot be a member."""
+    for n, _ in assets:
+        try:
+            swift_member(asset_symbol_name(n))
+        except ValueError as e:
+            raise ValueError(f"asset {n!r}: {e}; rename it") from None
+    colors = sorted({asset_symbol_name(n) for n, c in assets if c})
+    images = sorted({asset_symbol_name(n) for n, c in assets if not c})
+    kit, color, image = ("AppKit", "NSColor", "NSImage") if platform == "macos" else \
+        ("UIKit", "UIColor", "UIImage")
+    lines = ["// Generated by tools/xcodeproj2xtool.py: the asset symbol extensions Xcode",
+             "// writes (ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS).",
+             "// Guarded as the asset symbols themselves: nothing on a toolchain without",
+             "// DeveloperToolsSupport.",
+             "#if canImport(DeveloperToolsSupport)",
+             "import DeveloperToolsSupport", "import SwiftUI", f"#if canImport({kit})", f"import {kit}",
+             "#endif", ""]
+
+    def block(kind, resource, names, init, guard=None):
+        names = [n for n in names if n not in SDK_MEMBERS[kind]]
+        if not names:
+            return
+        if guard:
+            lines.append(f"#if canImport({guard})")
+        lines.append("@available(iOS 17.0, macOS 14.0, tvOS 17.0, watchOS 10.0, *)")
+        lines.append(f"extension {kind} {{")
+        lines.extend(f"    static var {swift_member(n)}: {kind} "
+                     f"{{ {init.format(f'DeveloperToolsSupport.{resource}.{swift_member(n)}')} }}"
+                     for n in names)
+        lines.extend(["}"] + (["#endif"] if guard else []) + [""])
+
+    block("Color", "ColorResource", colors, "Color({})")
+    block(color, "ColorResource", colors, color + "(resource: {})", kit)
+    block("Image", "ImageResource", images, "Image({})")
+    block(image, "ImageResource", images, image + "(resource: {})", kit)
+    lines.append("#endif  // canImport(DeveloperToolsSupport)")
+    return "\n".join(lines) + "\n"
+
+
 class Generator:
-    def __init__(self, proj_path, target_name=None, out_dir=None, bundle_id=None):
+    def __init__(self, proj_path, target_name=None, out_dir=None, bundle_id=None,
+                 configuration="Release"):
         self.proj_path = proj_path
         self.proj_dir = os.path.dirname(os.path.abspath(proj_path))
         self.data = parse_pbxproj(os.path.join(proj_path, "project.pbxproj"))
@@ -326,6 +502,8 @@ class Generator:
         self.out_dir = out_dir or os.path.join(self.proj_dir, "omarchy-xtool")
         self.target_name = target_name
         self.forced_bundle_id = bundle_id
+        # Build configuration whose settings every lookup reads (Release by default).
+        self.configuration = configuration
         self.project = self.objs[self.data["rootObject"]]
 
     def warn(self, msg):
@@ -339,10 +517,11 @@ class Generator:
 
     # -- settings ---------------------------------------------------------
 
-    def config_layers(self, cfg_list_id, config="Release"):
+    def config_layers(self, cfg_list_id, config=None):
         """One configuration of a configuration list: its xcconfig's path
         relative to the project dir (when it has one), then its pbxproj settings."""
         layers = []
+        config = config or self.configuration
         cl = self.objs.get(cfg_list_id)
         for cfg_id in (cl or {}).get("buildConfigurations", []):
             cfg = self.objs[cfg_id]
@@ -366,7 +545,7 @@ class Generator:
                 for l in self.config_layers(cfg_list_id)]
 
     def target_merged(self, target):
-        """Release settings: project xcconfig < project < target xcconfig < target."""
+        """Settings of the configuration: project xcconfig < project < target xcconfig < target."""
         layers = self.config_settings(self.project.get("buildConfigurationList"))
         layers += self.config_settings(target.get("buildConfigurationList"))
         return layers
@@ -1869,8 +2048,16 @@ class Generator:
                       f"{', '.join(other_exts)}")
         return embedded
 
+    def configuration_names(self, cfg_list_id):
+        cl = self.objs.get(cfg_list_id) or {}
+        return [self.objs[c].get("name") for c in cl.get("buildConfigurations", [])]
+
     def run(self):
         target_id, self.target = self.pick_target()
+        names = self.configuration_names(self.target.get("buildConfigurationList"))
+        if self.configuration not in names:
+            raise SystemExit(f"error: target {self.target.get('name')!r} has no configuration "
+                             f"{self.configuration!r} (have: {', '.join(names) or 'none'})")
         target = self.target
         name = target["name"]
         layers = self.target_merged(target)
@@ -1911,6 +2098,7 @@ class Generator:
 
         self.write_manifest(name, layers, packages, app_products,
                             excludes, resources, app_swift, extensions)
+        self.write_asset_symbol_extensions(name, layers, resources)
         bundle = self.bundle_id(layers)
         if self.forced_bundle_id:
             bundle = self._rebase_extension_bundle_ids(extensions, bundle)
@@ -2035,6 +2223,32 @@ class Generator:
             ss = ", ".join(swift)
             txt += f"            swiftSettings: [{ss}]\n"
         return txt + "        ),\n"
+
+    def write_asset_symbol_extensions(self, name, layers, resources):
+        """Xcode adds SwiftUI and UIKit (AppKit) shortcuts to the asset symbols
+        when ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS is YES:
+        Color.brandBlue, UIColor(.brandBlue), Image.logo. A package target gets
+        the symbols only (SwiftBuild passes the setting as NO there), so code
+        using the shortcuts does not build: they are written next to the sources,
+        under the names actool gives the symbols, members the SDK already has
+        left out as Xcode does."""
+        key = "ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS"
+        if (self.setting(layers, key) or "").upper() != "YES":
+            return
+        src = os.path.join(self.out_dir, "Sources", name)
+        catalogs = [os.path.join(src, rel) for kind, rel in resources
+                    if kind == ".process" and rel.endswith(".xcassets")]
+        assets = sorted({a for c in catalogs if os.path.isdir(c) for a in asset_catalog_names(c)})
+        if not assets:
+            return
+        try:
+            txt = asset_symbol_extensions(assets, self.platform)
+        except ValueError as e:
+            raise SystemExit(f"error: asset symbol extensions: {e}")
+        with open(os.path.join(src, "GeneratedAssetSymbolExtensions.swift"), "w") as f:
+            f.write(txt)
+        print(f"wrote Sources/{name}/GeneratedAssetSymbolExtensions.swift "
+              f"({key} = YES, {len(assets)} assets)")
 
     def write_manifest(self, name, layers, packages, products,
                        excludes, resources, swift, extensions):
@@ -2259,6 +2473,7 @@ SELF_TEST_PROJ = r"""// !$*UTF8*$!
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = DemoIcon;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Demo App";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -2363,6 +2578,14 @@ SELF_TEST_PROJ = r"""// !$*UTF8*$!
 """
 
 
+def _raises(f, *args):
+    try:
+        f(*args)
+    except ValueError:
+        return True
+    return False
+
+
 def self_test():
     import shutil
     import tempfile
@@ -2381,6 +2604,8 @@ def self_test():
 
 
 def _self_test(root):
+    kw = asset_symbol_extensions([("default", True), ("class", True), ("self", True),
+                                  ("brand-blue", True)], "ios")
     proj = os.path.join(root, "DemoApp.xcodeproj")
     os.makedirs(os.path.join(proj, "project.xcworkspace", "xcshareddata",
                              "swiftpm"))
@@ -2391,6 +2616,11 @@ def _self_test(root):
     open(os.path.join(src, "Helper.swift"), "w").write("let y = 2\n")
     open(os.path.join(src, "Unused.swift"), "w").write("let z = 3\n")
     os.makedirs(os.path.join(src, "Assets.xcassets"))
+    for asset in ("brand-blue.colorset", "red.colorset", "Logo.imageset", "Café.colorset",
+                  "背景.colorset", "Icons/Star.imageset"):
+        os.makedirs(os.path.join(src, "Assets.xcassets", asset))
+    with open(os.path.join(src, "Assets.xcassets", "Icons", "Contents.json"), "w") as f:
+        json.dump({"properties": {"provides-namespace": True}}, f)
     open(os.path.join(root, "proj.xcconfig"), "w").write(
         "// comment\nBUNDLE_PREFIX = net.example\n")
     with open(os.path.join(proj, "project.xcworkspace", "xcshareddata",
@@ -2456,6 +2686,8 @@ def _self_test(root):
     warnings_text = err_buf.getvalue()
     pkg = open(os.path.join(out, "Package.swift")).read()
     yml = open(os.path.join(out, "xtool.yml")).read()
+    symbols_path = os.path.join(out, "Sources", "DemoApp", "GeneratedAssetSymbolExtensions.swift")
+    symbols = open(symbols_path).read() if os.path.exists(symbols_path) else ""
     wpl = plistlib.load(open(os.path.join(out, "DemoWidget-Info.plist"), "rb"))
     checks = [
         ("tools-version", "// swift-tools-version: 6.2" in pkg),
@@ -2473,6 +2705,44 @@ def _self_test(root):
         ("bare slash regex feature", '.enableUpcomingFeature("BareSlashRegexLiterals")' in pkg),
         ("source ancestor symlink", 'exclude' in pkg and '"src/Unused.swift"' in pkg),
         ("resource process", '.process("src/Assets.xcassets")' in pkg),
+        ("asset symbol extensions: Color", "static var brandBlue: Color" in symbols),
+        ("asset symbol extensions: UIColor", "static var brandBlue: UIColor { UIColor(resource:" in symbols),
+        ("asset symbol extensions: UIImage", "static var logo: UIImage" in symbols),
+        ("asset symbol extensions: SDK member left out", "static var red:" not in symbols),
+        ("asset symbol extensions: Unicode names", "static var café: Color" in symbols
+         and "static var 背景: Color" in symbols),
+        ("asset symbol extensions: namespaced name", "static var iconsStar: Image" in symbols),
+        # Names AssetSymbols.swiftName (tools/darwin-tools) gives, from a Swift 6.4 run
+        ("asset symbol names match AssetSymbols.swiftName", all(
+            asset_symbol_name(n) == want for n, want in (
+                ("Café", "café"), ("Cafe\u0301", "cafe\u0301"), ("背景", "背景"),
+                ("背景-色", "背景色"), ("Icons/Star", "iconsStar"), ("brand-blue", "brandBlue"),
+                ("URL", "url"), ("9patch", "_9patch"), ("½ cup", "_½Cup"),
+                ("Ⅷ-roman", "_ⅷRoman"), ("Ⓐ circled", "ⓐCircled"), ("naïve_ÉLAN", "naïveÉLAN"),
+                ("ΣΙΓΜΑ", "σιγμα"), ("emoji-👍🏽-x", "emojiX"), ("---", "_"),
+                ("٣abc", "_٣abc"), ("ǅungla", "ǆungla"), ("x²", "x²")))),
+        ("asset symbol name: leading Other_Alphabetic mark refused", _raises(asset_symbol_name, "\u1885Logo")),
+        ("asset symbol name: leading combining accent refused", _raises(asset_symbol_name, "\u0301Logo")),
+        ("asset symbol name: unknown code point refused", _raises(asset_symbol_name, "Logo\U000E0080")),
+        ("asset symbol name: mark inside a word kept", asset_symbol_name("Logo\u1885x") == "logo\u1885x"),
+        # Swift 6.4: a\u200dB -> a\u200dB, Icons/A\u200db -> iconsA\u200db (ZWJ clusters with
+        # what precedes it only); format characters are refused rather than clustered
+        ("asset symbol name: zero width joiner refused", _raises(asset_symbol_name, "a\u200dB")
+         and _raises(asset_symbol_name, "Icons/A\u200db")),
+        ("asset symbol name: other format character refused", _raises(asset_symbol_name, "a\u200bB")),
+        ("keyword shortcuts escaped", all(
+            f"static var `{k}`: Color {{ Color(DeveloperToolsSupport.ColorResource.`{k}`) }}" in kw
+            for k in ("default", "class", "self"))),
+        ("non-keyword shortcut not escaped", "static var brandBlue: Color { Color(" in kw),
+        ("underscore-only symbol refused", _raises(asset_symbol_extensions, [("+", True)], "ios")),
+        # swiftName lowercases the head, so a Type asset is `type`; the member
+        # guard still refuses the metatype names
+        ("Type and Protocol refused as members", _raises(swift_member, "Type")
+         and _raises(swift_member, "Protocol") and swift_member("type") == "type"
+         and swift_member("protocol") == "`protocol`"),
+        ("DeveloperToolsSupport guarded", kw.index("#if canImport(DeveloperToolsSupport)")
+         < kw.index("import DeveloperToolsSupport")
+         and kw.rstrip().endswith("#endif  // canImport(DeveloperToolsSupport)")),
         ("bundleID expanded from xcconfig", "bundleID: net.example.demo" in yml),
         ("generated Info.plist", "infoPath: Info.plist" in yml),
         ("Info.plist content", plistlib.load(open(os.path.join(out, "Info.plist"),
@@ -3056,6 +3326,10 @@ def main():
                                      "has several")
     ap.add_argument("--out", help="output directory "
                                   "(default: <project root>/omarchy-xtool)")
+    ap.add_argument("--configuration", metavar="NAME", default="Release",
+                    help="build configuration whose settings the adapter takes: "
+                         "bundle ID, Info.plist values, compilation conditions "
+                         "(default: Release)")
     ap.add_argument("--self-test", action="store_true",
                     help="run the built-in round-trip check on a synthetic "
                          "classic-groups project")
@@ -3073,7 +3347,8 @@ def main():
     if not args.project.endswith(".xcodeproj") or \
             not os.path.isfile(os.path.join(args.project, "project.pbxproj")):
         ap.error(f"{args.project} is not an .xcodeproj directory")
-    Generator(args.project, args.target, args.out, args.bundle_id).run()
+    Generator(args.project, args.target, args.out, args.bundle_id,
+              args.configuration).run()
 
 
 if __name__ == "__main__":

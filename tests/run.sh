@@ -4,7 +4,7 @@
 set -uo pipefail
 here=$(dirname "$(readlink -f "$0")")
 repo=$here/..
-cd "$repo"
+cd "$repo" || exit 1
 fail=0
 tmp_selftest=$(mktemp)
 trap 'rm -f "$tmp_selftest"' EXIT
@@ -21,6 +21,13 @@ if python3 flutter/tools/gen-extensions.py --self-test >"$tmp_selftest" 2>&1; th
   grep -E "self-test ok" "$tmp_selftest" | sed 's/^/ok   /'
 else
   echo "FAIL gen-extensions self-test"; sed 's/^/  /' "$tmp_selftest"; fail=1
+fi
+
+echo "== tools/host-manifests.py --self-test"
+if python3 tools/host-manifests.py --self-test >"$tmp_selftest" 2>&1; then
+  grep -E "self-test passed" "$tmp_selftest" | sed 's/^/ok   /'
+else
+  echo "FAIL host-manifests self-test"; sed 's/^/  /' "$tmp_selftest"; fail=1
 fi
 
 echo "== tools/xcodeproj2xtool.py fixture golden"
@@ -65,9 +72,20 @@ bash tests/flutter-assets/run.sh || fail=1
 
 echo "== tests/ship-root-resources/run.sh"
 bash tests/ship-root-resources/run.sh || fail=1
+echo "== tests/ship-bundle-info-plist/run.sh"
+bash tests/ship-bundle-info-plist/run.sh || fail=1
+echo "== tests/kmp-framework/run.sh"
+bash tests/kmp-framework/run.sh || fail=1
+echo "== tests/actool-shared-folder/run.sh"
+bash tests/actool-shared-folder/run.sh || fail=1
+echo "== tests/actool-single-scale/run.sh"
+bash tests/actool-single-scale/run.sh || fail=1
 
 echo "== tests/flutter-ship/run.sh"
 bash tests/flutter-ship/run.sh || fail=1
+
+echo "== tests/device-run-app-icon/run.sh"
+bash tests/device-run-app-icon/run.sh || fail=1
 
 echo "== tests/device-run-console/run.sh"
 bash tests/device-run-console/run.sh || fail=1
@@ -107,6 +125,13 @@ else
   echo "SKIP  compile-golden.sh: regenerates goldens with Apple's ibtool and"
   echo "      needs a Mac with Xcode (xcrun not on this host). Run it there:"
   echo "      tar -C tests/ibtool -cf - src | ssh mac \"\$(cat tests/ibtool/compile-golden.sh)\" | tar -C tests/ibtool -xf -"
+fi
+
+echo "== tests/test_compat_suite.py (tools/compat-suite.py)"
+if python3 -m unittest discover -s tests -p 'test_compat_suite.py' >"$tmp_selftest" 2>&1; then
+  grep -E "^Ran|^OK" "$tmp_selftest" | sed 's/^/ok   /'
+else
+  echo "FAIL compat-suite tests"; sed 's/^/  /' "$tmp_selftest"; fail=1
 fi
 
 if [ "$fail" -ne 0 ]; then

@@ -87,84 +87,7 @@ for target in "$app" "$app"/PlugIns/*.appex; do
 done
 
 echo "== 3. App icon catalog =="
-# As in Xcode's app target, actool --app-icon puts the icon into the app's own Assets.car and
-# Info.plist. Search the app target (Sources/<App>) first, then the top of the project (4 levels:
-# ./AppIcon.icon, ./Resources/Assets.xcassets/AppIcon.appiconset); deeper catalogs belong to
-# vendored packages and their test apps. APP_ICON names the set (default AppIcon). actool takes
-# the .xcassets dir for an appiconset, and the Icon Composer .icon dir itself. Alternate icons
-# (ALTERNATE_APP_ICONS / INCLUDE_ALL_APP_ICONS from xtool.env, Xcode 27's
-# ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES / _INCLUDE_ALL_APPICON_ASSETS) add the
-# --alternate-app-icon / --include-all-app-icons flags and every icon-bearing catalog of the
-# target to the same invocation, like Xcode compiles all of a target's catalogs in one call.
-icon=${APP_ICON:-AppIcon}
-alt_args=()
-alt_names=${ALTERNATE_APP_ICONS:-}
-if [ -n "$alt_names" ]; then
-  for n in $alt_names; do alt_args+=(--alternate-app-icon "$n"); done
-fi
-if [ "${INCLUDE_ALL_APP_ICONS:-}" = "YES" ]; then
-  alt_args+=(--include-all-app-icons)
-fi
-case "${STANDALONE_ICON_BEHAVIOR:-}" in
-  all|none) alt_args+=(--standalone-icon-behavior "$STANDALONE_ICON_BEHAVIOR") ;;
-esac
-catalogs=()
-for src in "Sources/$(basename "$app" .app)" .; do
-  [ -d "$src" ] || continue
-  depth=; [ "$src" = . ] && depth="-maxdepth 4"
-  # shellcheck disable=SC2086
-  mapfile -t found < <(find -L "$src" $depth \( -name .build -o -name xtool \) -prune -o \
-    \( -name "*.appiconset" -type d -o -name "*.icon" -type d \) -print)
-  for f in "${found[@]}"; do
-    # Every icon-bearing catalog and .icon of the target joins the call, as Xcode passes all
-    # of a target's catalogs; actool selects by --app-icon / --alternate-app-icon /
-    # --include-all-app-icons and drops the rest silently, like Apple's.
-    case "$f" in
-      *.appiconset) catalogs+=("$(dirname "$f")") ;;
-      *.icon) catalogs+=("$f") ;;
-    esac
-  done
-  [ "${#catalogs[@]}" = 0 ] || break
-done
-# Icon Composer icons the generator links into the project root (the primary and its alternates).
-for f in ./*.icon; do [ -d "$f" ] && catalogs+=("$f"); done
-mapfile -t catalogs < <(for c in "${catalogs[@]}"; do readlink -f "$c"; done | sort -u)
-min=$("$PY" -c 'import plistlib,sys; print(plistlib.load(open(sys.argv[1],"rb"))["MinimumOSVersion"])' "$app/Info.plist")
-case "${#catalogs[@]}" in
-  0) echo "no $icon.appiconset or $icon.icon in the project; App Store upload needs an app icon" ;;
-  *)
-    "$ACTOOL" "${catalogs[@]}" --compile "$app" --platform iphoneos --app-icon "$icon" \
-      "${alt_args[@]}" \
-      --minimum-deployment-target "$min" --output-partial-info-plist "$stage/icon.plist" \
-      --output-format human-readable-text
-    "$PY" -c 'import plistlib,sys; p=sys.argv[1]; d=plistlib.load(open(p,"rb")); d.update(plistlib.load(open(sys.argv[2],"rb")))
-plistlib.dump(d, open(p,"wb"), fmt=plistlib.FMT_BINARY)' "$app/Info.plist" "$stage/icon.plist"
-    ;;
-esac
-for appex in "$app"/PlugIns/*.appex; do
-  [ -d "$appex" ] || continue
-  exname=$(basename "$appex" .appex)
-  exicon=""
-  while IFS= read -r pair; do
-    case "$pair" in "$exname="*) exicon=${pair#*=} ;; esac
-  done <<< "${EXTENSION_APP_ICONS:-}"
-  [ -n "$exicon" ] || continue
-  exsets=()
-  while IFS= read -r -d '' f; do exsets+=("$(dirname "$f")"); done \
-    < <(find -L "Sources/$exname" -name "$exicon.appiconset" -type d -print0 2>/dev/null)
-  [ "${#exsets[@]}" -gt 0 ] || continue
-  # An empty placeholder set (the widget's) compiles to nothing in Xcode;
-  # skip it instead of emitting an empty icon plist.
-  if ! grep -q '"filename"' "${exsets[0]}/$exicon.appiconset/Contents.json"; then
-    echo "  $exname: $exicon.appiconset is an empty placeholder; nothing to compile"
-    continue
-  fi
-  "$ACTOOL" "${exsets[0]}" --compile "$appex" --platform iphoneos --app-icon "$exicon" \
-    --minimum-deployment-target "$min" --output-partial-info-plist "$stage/$exname-icon.plist" \
-    --output-format human-readable-text
-  "$PY" -c 'import plistlib,sys; p=sys.argv[1]; d=plistlib.load(open(p,"rb")); d.update(plistlib.load(open(sys.argv[2],"rb")))
-plistlib.dump(d, open(p,"wb"), fmt=plistlib.FMT_BINARY)' "$appex/Info.plist" "$stage/$exname-icon.plist"
-done
+PY="$PY" ACTOOL="$ACTOOL" "$here/tools/compile-app-icon.sh" "$app"
 
 if [ "$device" = 1 ]; then
   echo "== 4. Root-level resources =="
@@ -177,12 +100,24 @@ if [ "$device" = 1 ]; then
   # device fix; -n keeps what steps 2-3 placed and the built Info.plist.
   # App Store uploads keep the bundle layout: flattening everything into an
   # upload once stalled App Store processing.
+  # Code built as a package (SWIFT_PACKAGE, as the files SwiftGen generates)
+  # reads Bundle.module the other way round: SwiftGen's PlistFiles reads the
+  # resource bundle's Info.plist and traps on a key it lacks (the version, the
+  # display name, a custom key). That plist gets the keys of the target's it
+  # lacks; its own (identifier, package type, name) stay.
   for target in "$app" "$app"/PlugIns/*.appex; do
     [ -d "$target" ] || continue
     name=$(basename "${target%.*}")
     resbundle=$(find "$target" -maxdepth 1 -type d -name "*_$name.bundle" -print -quit)
     [ -n "$resbundle" ] || continue
     cp -an "$resbundle/." "$target/"
+    [ -f "$resbundle/Info.plist" ] || continue
+    "$PY" -c 'import plistlib, sys
+target, bundle = sys.argv[1:]
+own = plistlib.load(open(bundle, "rb"))
+merged = {**plistlib.load(open(target, "rb")), **own}
+if merged != own:
+    plistlib.dump(merged, open(bundle, "wb"), fmt=plistlib.FMT_BINARY)' "$target/Info.plist" "$resbundle/Info.plist"
   done
   if [ -n "$team" ]; then
     echo "== 5. Team prefix =="

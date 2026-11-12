@@ -35,7 +35,7 @@ adds TestFlight and the App Store.
 | Tool | Version | Source |
 |------|---------|--------|
 | Swift | 6.4.1 in the latest fresh-install check | AUR `swift-bin` |
-| xtool | 1.23.0 + 10 fixes (fork pin `f300489`; xtool-org/xtool #290-#293, #295, #302 still open upstream) | built from source by the installer |
+| xtool | main (`a2875dd`, with xtool-org/xtool#375, #430, #422 and #432) + the 11 fork commits (pin `7cc56c3`, fork tag `omarchy-main-pin`) | built from source by the installer |
 | pymobiledevice3 | latest from PyPI at install time | venv |
 | cryptography | 42 or later; a dependency of pymobiledevice3, in the same venv. `tools/asc.py identity` and `test-identity` stop with a message naming the version if it is older | venv |
 | LLDB | bundled with the installed Swift toolchain | `swift-bin` |
@@ -168,7 +168,11 @@ xtool dev run
 
 `xtool dev build` alone produces `xtool/HelloOmarchy.app` (arm64 Mach-O).
 An existing Xcode project: `tools/xcodeproj2xtool.py App.xcodeproj` writes an
-xtool adapter next to it, with SourceKit-LSP support. See
+xtool adapter next to it, with SourceKit-LSP support. It takes the settings of
+the Release configuration; `--configuration Debug` takes another one's (bundle
+ID, Info.plist values, compilation conditions). A dependency whose
+manifest tests the build machine (RxSwift drops RxCocoa when it is not a Mac)
+gets answered as on a Mac by `tools/host-manifests.py omarchy-xtool`. See
 [GETTING-STARTED.md](GETTING-STARTED.md), step 2.
 
 ## Run on your iPhone
@@ -198,6 +202,14 @@ only to hosts you trust.
 > Running Omarchy in the [tryomarchy.com](https://tryomarchy.com) Windows VM?
 > Do the [Windows VM iPhone USB setup](TRYOMARCHY-WINDOWS-USB.md) first.
 > Bare-metal installs do not need it.
+
+## Kotlin Multiplatform apps
+
+Gradle skips the iOS framework of a Kotlin Multiplatform project on Linux;
+`kmp/build-framework.sh` links it from the klibs Gradle builds, and the Swift
+app around it builds as an xtool package with the framework as a binary
+target. Verified on x86_64 with a Compose Multiplatform app. Details:
+[kmp/README.md](kmp/README.md).
 
 ## Flutter apps
 
@@ -249,6 +261,18 @@ id, creates an Apple Distribution certificate (the private key stays in
 with `rcodesign`, validates the `.ipa` offline (any `FAIL` stops it), uploads
 and prints Apple's processing result. It never submits a build for review.
 
+The console steps that remain after the upload are available as an opt-in
+command, `tools/asc.py publish IPA|APP NOTES_JSON` (same key variables;
+`ship.sh` itself stays as it is). Point `NOTES_JSON` at a Play-style
+`release_notes.json` (`[{"language": "en-US", "text": ...}]`, the same file
+Google Play takes): `publish` finds the App Store version for the bundle's
+version string (creates it when missing), attaches the uploaded build once
+TestFlight shows it `VALID` and fills "What's New" in every store locale
+(locales are mapped: `he` → `iw`, `zh-Hans` → `zh-CN`, base language, then
+`en-US`; emoji are stripped, App Review rejects them). Like `ship.sh` itself,
+it never submits a build for review — after "What's New" it stops and says
+submission is a manual step. Re-runs change nothing that is already done.
+
 Without a key it signs with a local TEST identity. That proves the pipeline
 only; Apple rejects the signature.
 
@@ -295,6 +319,8 @@ Large projects need `ulimit -n 65536` before `xtool dev build`.
   reports on Linux.
 - [sdk-free/README.md](sdk-free/README.md): the no-Xcode mode.
 - [flutter/README.md](flutter/README.md): the Flutter pipeline.
+- [kmp/README.md](kmp/README.md): the iOS framework of a Kotlin
+  Multiplatform app, linked on Linux, and the app around it.
 - [FINDINGS.md](FINDINGS.md): dated findings and fixes, with supporting
   test records under `receipts/`.
 

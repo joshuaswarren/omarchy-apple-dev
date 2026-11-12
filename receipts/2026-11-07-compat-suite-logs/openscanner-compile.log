@@ -1,0 +1,31 @@
+Planning...
+[LSP] Created .bsp/xtool.json for enhanced IDE support. You may
+      need to restart your editor for the change to take effect.
+      You can disable this with `skipLSP: true` in xtool.yml.
+xtool: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/.local/lib/omarchy-apple-dev/xtool-c9f436303f9fe4dbeef46dfb9e208f1bb0912fe4/libFoundationXML.so)
+xtool: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/.local/lib/omarchy-apple-dev/xtool-c9f436303f9fe4dbeef46dfb9e208f1bb0912fe4/libFoundationXML.so)
+xtool: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/.local/lib/omarchy-apple-dev/xtool-c9f436303f9fe4dbeef46dfb9e208f1bb0912fe4/libFoundationXML.so)
+xtool: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/.local/lib/omarchy-apple-dev/xtool-c9f436303f9fe4dbeef46dfb9e208f1bb0912fe4/libFoundationXML.so)
+xtool: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/.local/lib/omarchy-apple-dev/xtool-c9f436303f9fe4dbeef46dfb9e208f1bb0912fe4/libFoundationXML.so)
+xtool: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/.local/lib/omarchy-apple-dev/xtool-c9f436303f9fe4dbeef46dfb9e208f1bb0912fe4/libFoundationXML.so)
+xtool: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/.local/lib/omarchy-apple-dev/xtool-c9f436303f9fe4dbeef46dfb9e208f1bb0912fe4/libFoundationXML.so)
+xtool: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/.local/lib/omarchy-apple-dev/xtool-c9f436303f9fe4dbeef46dfb9e208f1bb0912fe4/libFoundationXML.so)
+xtool: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/.local/lib/omarchy-apple-dev/xtool-c9f436303f9fe4dbeef46dfb9e208f1bb0912fe4/libFoundationXML.so)
+xtool: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/.local/lib/omarchy-apple-dev/xtool-c9f436303f9fe4dbeef46dfb9e208f1bb0912fe4/libFoundationXML.so)
+swift runtime: unable to protect path to swift-backtrace at 0xffff34f95000; disabling backtracing.
+swift runtime: unable to protect environment for swift-backtrace at 0xffff34f8d000; disabling backtracing.
+~/scratch/w7m-suite/swift-root/usr/bin/swift-package: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-package: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-package: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-package: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-package: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-package: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-package: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-package: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-package: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-package: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+swift runtime: unable to protect path to swift-backtrace at 0xffff3d135000; disabling backtracing.
+swift runtime: unable to protect environment for swift-backtrace at 0xffff3d12d000; disabling backtracing.
+error: 'omarchy-xtool': multiple resources named 'Assets.xcassets' in target 'ScannerWidgetExtension'
+error: 'omarchy-xtool': multiple resources named 'Contents.json' in target 'ScannerWidgetExtension'
+Error: exited(1)

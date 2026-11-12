@@ -2,6 +2,21 @@
 
 ## v0.4.3
 
+### asc.py publish: the post-upload release steps as an opt-in command
+
+- `tools/asc.py publish IPA|APP NOTES_JSON` runs the release steps that `ship.sh --upload` leaves to the console, as a standalone opt-in command (`ship.sh` is unchanged): it finds the App Store version for the bundle's version string (creates it, `releaseType MANUAL`, when missing), attaches the uploaded build by build number — `VALID` and not expired; a build still processing stops with a plain message, rerun once TestFlight shows it `VALID` — and fills "What's New" in every existing store locale from a Play-style `release_notes.json` (`[{"language": "en-US", "text": ...}]`, the same file Google Play takes). It never submits a build for review: the last line says submission stays a manual step in App Store Connect, so the README's "never submits" line stays true for the whole pipeline.
+- Locales map the way Play and the App Store disagree: exact match, then the Play alias (`he` → `iw`, `id` → `in`, `zh-Hans` → `zh-CN`, `zh-Hant` → `zh-TW`), then the base language (`nl-NL` → `nl`), then `en-US`, then `ru`; every store locale gets text or is reported as left empty, and notes locales no store localization uses are listed. Emoji are stripped from the notes (App Review rejects them; the Play original keeps them) — an entry that is empty once stripped is an error.
+- The frozen-state trap is guarded: when the version string exists only in a state Apple has locked (IN_REVIEW and friends), `publish` stops with a plain message and a non-zero exit (it is `die`, so a script never reads the stop as success) instead of creating a duplicate version and dying on an opaque 409. Re-runs change nothing: a version already WAITING_FOR_REVIEW is left untouched, an already-attached matching build is reported, not re-attached, and up-to-date "What's New" text is skipped; an attached build with a different number than the bundle's is a hard error.
+- `tests/test_asc_publish.py` runs the real `asc.py` command line with `call` replaced by a canned responder, so nothing touches the network and exit codes are real. Eight rows: the full create-attach-fill pass with per-locale mapping and emoji stripping, the mapping tail with the missing/unused locale reports, the emoji-only error, the frozen-state non-zero stop (asserted on the real exit code), the WAITING_FOR_REVIEW no-op re-run, the editable no-op re-run, the build-number mismatch and the usage line naming `publish`. Six mutants (alias step skipped, empty notes text not an error, frozen version returned instead of dying, build re-attached, WAITING_FOR_REVIEW return dropped, a review-submission PATCH added back) each fail the rows they name.
+
+### xtool password login uses the provider user-agent
+
+- The installer pins the six-file correction from xtool-org/xtool#406 while
+  preserving the existing packaging and build-server fixes. GrandSlam requests
+  use the user-agent returned with the anisette provider's client information.
+- The SDK version stamp stays unchanged. This pin change does not sign in,
+  install an app, or change stored credentials.
+
 ### Optional registration for a separately installed Tomacco frontend
 
 - `tools/tomacco-frontend.py` adds explicit `enable`, `status`, `launch`, and
@@ -34,6 +49,14 @@
 - The README's dependency table lists `cryptography` 42 or later. The installer's `pip install pymobiledevice3` pulls it in as a dependency; this change does not touch the installer.
 - `tests/test_asc_cryptography.py` runs the real `asc.py` as a command with `cryptography.__version__` set to 41.0.7 and checks, for `identity` and `test-identity`, the message and the absence of a traceback, and, for the other five commands, that the check does not stop them; checks that the installed version passes; and checks the version strings 42.0.0, 42.0.0rc1, 43.0.0.dev1, 50.0.1 (accepted) and 41.0.7, 41.0.0.dev0, 7.2 (refused). Five mutants (call dropped, every command guarded, only `test-identity` guarded, minor version compared, 42 refused) are each caught.
 - `tests/asc/appex-seal.py` compares the major version only, so a version string such as `42.0rc1` cannot crash it.
+
+### weaklink writes the real weak load command
+
+- `flutter/tools/weaklink.py` flipped LC_LOAD_DYLIB to LC_LOAD_WEAK_DYLIB by writing cmd `0x18` — without the `LC_REQ_DYLD` bit the value is not a load command at all, and App Store upload rejected such an ipa with ITMS-91032 ("Invalid executable ... contains an invalid load command"). The command is `0x80000018`; the flip now writes that, touches nothing but the cmd field, and a second run is a no-op. Also verified on a real sentry-cocoa 9.x link: no chained-fixups import binds to SwiftUICore (the framework arrives by autolink alone), so the weak command leaves no strong imports behind and matches the shape Xcode-16-built apps ship.
+- The weak-link tool now finishes parsing all selected slices before writing
+  any load command. A later parse error returns nonzero and leaves the input
+  bytes unchanged. Real CLI tests cover a truncated later command, the valid
+  command-only rewrite and a second run with no changes.
 
 ### Flutter builds carry the app extensions the Runner embeds
 

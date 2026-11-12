@@ -1,0 +1,3 @@
+APP_ICON=AppIcon   # pass to ship.sh
+wrote ~/scratch/w7m-suite/apps/clean-architecture-swiftui/omarchy-xtool (Package.swift, xtool.yml, xtool.env, 1 symlinks under Sources/, 0 extensions)
+warning: wrote a minimal Info.plist from INFOPLIST_KEY_* settings; review it before shipping

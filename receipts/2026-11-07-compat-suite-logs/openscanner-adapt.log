@@ -1,0 +1,6 @@
+scanner: generated 1 intent Swift file(s) (ConfigurationIntent.swift)
+ScannerWidgetExtension: generated 1 intent Swift file(s) (ConfigurationIntent.swift)
+APP_ICON=AppIcon   # pass to ship.sh
+wrote ~/scratch/w7m-suite/apps/OpenScanner/omarchy-xtool (Package.swift, xtool.yml, xtool.env, 15 symlinks under Sources/, 1 extensions, 2 alternate icon dirs)
+warning: CODE_SIGN_ENTITLEMENTS 'scanner/scanner.entitlements' not wired (xtool dev signs without entitlements; ship.sh signs with its own)
+warning: multiple resources named 'Contents.json' remain; rename one (SwiftPM requires unique resource names per target)

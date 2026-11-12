@@ -1,0 +1,193 @@
+Planning...
+[LSP] Created .bsp/xtool.json for enhanced IDE support. You may
+      need to restart your editor for the change to take effect.
+      You can disable this with `skipLSP: true` in xtool.yml.
+Building for debugging...
+[Provisioning 6 / 7]
+[Pre-planning 1 / 126]
+[Planning deferred tasks]
+[36 / 63] CountriesSwiftUI_CountriesSwiftUI
+[40 / 63] EnvironmentOverrides
+[51 / 132]
+[60 / 132]
+[63 / 132]
+[66 / 132]
+[71 / 132]
+[78 / 132]
+[80 / 132]
+[95 / 132]
+[97 / 132]
+[102 / 132]
+[109 / 132] EnvironmentOverrides
+[117 / 132] CountriesSwiftUI
+[118 / 133] EnvironmentOverrides
+[120 / 133] CountriesSwiftUI
+[129 / 142] CountriesSwiftUI
+[137 / 142] CountriesSwiftUI
+[140 / 142] CountriesSwiftUI-App-product
+Build complete! (7.38 secs)
+Wrote to ~/scratch/w7m-suite/apps/clean-architecture-swiftui/omarchy-xtool/xtool/CountriesSwiftUI.app
+xtool: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/.local/lib/omarchy-apple-dev/xtool-c9f436303f9fe4dbeef46dfb9e208f1bb0912fe4/libFoundationXML.so)
+xtool: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/.local/lib/omarchy-apple-dev/xtool-c9f436303f9fe4dbeef46dfb9e208f1bb0912fe4/libFoundationXML.so)
+xtool: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/.local/lib/omarchy-apple-dev/xtool-c9f436303f9fe4dbeef46dfb9e208f1bb0912fe4/libFoundationXML.so)
+xtool: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/.local/lib/omarchy-apple-dev/xtool-c9f436303f9fe4dbeef46dfb9e208f1bb0912fe4/libFoundationXML.so)
+xtool: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/.local/lib/omarchy-apple-dev/xtool-c9f436303f9fe4dbeef46dfb9e208f1bb0912fe4/libFoundationXML.so)
+xtool: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/.local/lib/omarchy-apple-dev/xtool-c9f436303f9fe4dbeef46dfb9e208f1bb0912fe4/libFoundationXML.so)
+xtool: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/.local/lib/omarchy-apple-dev/xtool-c9f436303f9fe4dbeef46dfb9e208f1bb0912fe4/libFoundationXML.so)
+xtool: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/.local/lib/omarchy-apple-dev/xtool-c9f436303f9fe4dbeef46dfb9e208f1bb0912fe4/libFoundationXML.so)
+xtool: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/.local/lib/omarchy-apple-dev/xtool-c9f436303f9fe4dbeef46dfb9e208f1bb0912fe4/libFoundationXML.so)
+xtool: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/.local/lib/omarchy-apple-dev/xtool-c9f436303f9fe4dbeef46dfb9e208f1bb0912fe4/libFoundationXML.so)
+swift runtime: unable to protect path to swift-backtrace at 0xfffec0b85000; disabling backtracing.
+swift runtime: unable to protect environment for swift-backtrace at 0xfffec0b7d000; disabling backtracing.
+~/scratch/w7m-suite/swift-root/usr/bin/swift-package: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-package: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-package: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-package: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-package: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-package: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-package: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-package: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-package: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-package: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+swift runtime: unable to protect path to swift-backtrace at 0xffff06285000; disabling backtracing.
+swift runtime: unable to protect environment for swift-backtrace at 0xffff0627d000; disabling backtracing.
+Fetching https://github.com/nalexn/EnvironmentOverrides from cache
+Fetched https://github.com/nalexn/EnvironmentOverrides from cache (0.25s)
+Computing version for https://github.com/nalexn/EnvironmentOverrides
+Computed https://github.com/nalexn/EnvironmentOverrides at 0.0.4 (0.41s)
+Creating working copy for https://github.com/nalexn/EnvironmentOverrides
+Working copy of https://github.com/nalexn/EnvironmentOverrides resolved at 0.0.4
+swift runtime: unable to protect path to swift-backtrace at 0xffff3a845000; disabling backtracing.
+swift runtime: unable to protect environment for swift-backtrace at 0xffff3a83d000; disabling backtracing.
+~/scratch/w7m-suite/swift-root/usr/bin/swift-package: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-package: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-package: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-package: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-package: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-package: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-package: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-package: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-package: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-package: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+swift runtime: unable to protect path to swift-backtrace at 0xffffa68c5000; disabling backtracing.
+swift runtime: unable to protect environment for swift-backtrace at 0xffffa68bd000; disabling backtracing.
+~/scratch/w7m-suite/swift-root/usr/bin/swift-package: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-package: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-package: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-package: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-package: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-package: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-package: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-package: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-package: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-package: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+swift runtime: unable to protect path to swift-backtrace at 0xffff83d75000; disabling backtracing.
+swift runtime: unable to protect environment for swift-backtrace at 0xffff83d6d000; disabling backtracing.
+swift runtime: unable to protect path to swift-backtrace at 0xffff135a5000; disabling backtracing.
+swift runtime: unable to protect environment for swift-backtrace at 0xffff1359d000; disabling backtracing.
+swift runtime: unable to protect path to swift-backtrace at 0xffff47c65000; disabling backtracing.
+swift runtime: unable to protect environment for swift-backtrace at 0xffff47c5d000; disabling backtracing.
+~/scratch/w7m-suite/swift-root/usr/bin/swift-build: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-build: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-build: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-build: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-build: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-build: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-build: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-build: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-build: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+~/scratch/w7m-suite/swift-root/usr/bin/swift-build: ~/.local/lib/curses-narrow-compat/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/bin/../lib/swift/linux/libFoundationXML.so)
+swift runtime: unable to protect path to swift-backtrace at 0xfffefe805000; disabling backtracing.
+swift runtime: unable to protect environment for swift-backtrace at 0xfffefe7fd000; disabling backtracing.
+warning: '.xtool-tmp': swift runtime: unable to protect path to swift-backtrace at 0xffff01225000; disabling backtracing.
+swift runtime: unable to protect environment for swift-backtrace at 0xffff0121d000; disabling backtracing.
+swift runtime: unable to protect path to swift-backtrace at 0xffffadbd5000; disabling backtracing.
+swift runtime: unable to protect environment for swift-backtrace at 0xffffadbcd000; disabling backtracing.
+swift runtime: unable to protect path to swift-backtrace at 0xffffa22a5000; disabling backtracing.
+swift runtime: unable to protect environment for swift-backtrace at 0xffffa229d000; disabling backtracing.swift runtime: unable to protect path to swift-backtrace at 0xffff06625000; disabling backtracing.
+swift runtime: unable to protect environment for swift-backtrace at 0xffff0661d000; disabling backtracing.
+~/.swiftpm/swift-sdks/darwin.artifactbundle/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/actool: ~/scratch/w7m-suite/swift-root/usr/lib/swift/linux/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/lib/swift/linux/libFoundationXML.so)
+~/.swiftpm/swift-sdks/darwin.artifactbundle/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/actool: ~/scratch/w7m-suite/swift-root/usr/lib/swift/linux/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/lib/swift/linux/libFoundationXML.so)
+~/.swiftpm/swift-sdks/darwin.artifactbundle/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/actool: ~/scratch/w7m-suite/swift-root/usr/lib/swift/linux/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/lib/swift/linux/libFoundationXML.so)
+~/.swiftpm/swift-sdks/darwin.artifactbundle/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/actool: ~/scratch/w7m-suite/swift-root/usr/lib/swift/linux/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/lib/swift/linux/libFoundationXML.so)
+~/.swiftpm/swift-sdks/darwin.artifactbundle/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/actool: ~/scratch/w7m-suite/swift-root/usr/lib/swift/linux/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/lib/swift/linux/libFoundationXML.so)
+~/.swiftpm/swift-sdks/darwin.artifactbundle/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/actool: ~/scratch/w7m-suite/swift-root/usr/lib/swift/linux/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/lib/swift/linux/libFoundationXML.so)
+~/.swiftpm/swift-sdks/darwin.artifactbundle/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/actool: ~/scratch/w7m-suite/swift-root/usr/lib/swift/linux/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/lib/swift/linux/libFoundationXML.so)
+~/.swiftpm/swift-sdks/darwin.artifactbundle/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/actool: ~/scratch/w7m-suite/swift-root/usr/lib/swift/linux/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/lib/swift/linux/libFoundationXML.so)
+~/.swiftpm/swift-sdks/darwin.artifactbundle/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/actool: ~/scratch/w7m-suite/swift-root/usr/lib/swift/linux/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/lib/swift/linux/libFoundationXML.so)
+~/.swiftpm/swift-sdks/darwin.artifactbundle/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/actool: ~/scratch/w7m-suite/swift-root/usr/lib/swift/linux/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/lib/swift/linux/libFoundationXML.so)
+swift runtime: unable to protect path to swift-backtrace at 0xffff8a625000; disabling backtracing.
+swift runtime: unable to protect environment for swift-backtrace at 0xffff8a61d000; disabling backtracing.
+/* com.apple.actool.document.warnings */
+~/scratch/w7m-suite/apps/clean-architecture-swiftui/CountriesSwiftUI/Resources/Assets.xcassets/AccentColor.colorset: warning: skipped by the Linux actool: no color defined
+
+/* com.apple.actool.compilation-results */
+~/scratch/w7m-suite/apps/clean-architecture-swiftui/omarchy-xtool/.build/out/Intermediates.noindex/CountriesSwiftUI.build/Debug-iphoneos/CountriesSwiftUI_CountriesSwiftUI-b.build/assetcatalog_generated_info.plist_thinned
+
+~/.swiftpm/swift-sdks/darwin.artifactbundle/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/actool: ~/scratch/w7m-suite/swift-root/usr/lib/swift/linux/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/lib/swift/linux/libFoundationXML.so)
+~/.swiftpm/swift-sdks/darwin.artifactbundle/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/actool: ~/scratch/w7m-suite/swift-root/usr/lib/swift/linux/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/lib/swift/linux/libFoundationXML.so)
+~/.swiftpm/swift-sdks/darwin.artifactbundle/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/actool: ~/scratch/w7m-suite/swift-root/usr/lib/swift/linux/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/lib/swift/linux/libFoundationXML.so)
+~/.swiftpm/swift-sdks/darwin.artifactbundle/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/actool: ~/scratch/w7m-suite/swift-root/usr/lib/swift/linux/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/lib/swift/linux/libFoundationXML.so)
+~/.swiftpm/swift-sdks/darwin.artifactbundle/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/actool: ~/scratch/w7m-suite/swift-root/usr/lib/swift/linux/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/lib/swift/linux/libFoundationXML.so)
+~/.swiftpm/swift-sdks/darwin.artifactbundle/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/actool: ~/scratch/w7m-suite/swift-root/usr/lib/swift/linux/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/lib/swift/linux/libFoundationXML.so)
+~/.swiftpm/swift-sdks/darwin.artifactbundle/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/actool: ~/scratch/w7m-suite/swift-root/usr/lib/swift/linux/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/lib/swift/linux/libFoundationXML.so)
+~/.swiftpm/swift-sdks/darwin.artifactbundle/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/actool: ~/scratch/w7m-suite/swift-root/usr/lib/swift/linux/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/lib/swift/linux/libFoundationXML.so)
+~/.swiftpm/swift-sdks/darwin.artifactbundle/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/actool: ~/scratch/w7m-suite/swift-root/usr/lib/swift/linux/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/lib/swift/linux/libFoundationXML.so)
+~/.swiftpm/swift-sdks/darwin.artifactbundle/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/actool: ~/scratch/w7m-suite/swift-root/usr/lib/swift/linux/libxml2.so.2: no version information available (required by ~/scratch/w7m-suite/swift-root/usr/lib/swift/linux/libFoundationXML.so)
+swift runtime: unable to protect path to swift-backtrace at 0xfffef8af5000; disabling backtracing.
+swift runtime: unable to protect environment for swift-backtrace at 0xfffef8aed000; disabling backtracing.
+/* com.apple.actool.compilation-results */
+~/scratch/w7m-suite/apps/clean-architecture-swiftui/omarchy-xtool/.build/out/Intermediates.noindex/CountriesSwiftUI.build/Debug-iphoneos/CountriesSwiftUI-t.build/DerivedSources/GeneratedAssetSymbols-Index.plist
+~/scratch/w7m-suite/apps/clean-architecture-swiftui/omarchy-xtool/.build/out/Intermediates.noindex/CountriesSwiftUI.build/Debug-iphoneos/CountriesSwiftUI-t.build/DerivedSources/GeneratedAssetSymbols.h
+~/scratch/w7m-suite/apps/clean-architecture-swiftui/omarchy-xtool/.build/out/Intermediates.noindex/CountriesSwiftUI.build/Debug-iphoneos/CountriesSwiftUI-t.build/DerivedSources/GeneratedAssetSymbols.swift
+
+swift runtime: unable to protect path to swift-backtrace at 0xffff68ee5000; disabling backtracing.
+swift runtime: unable to protect environment for swift-backtrace at 0xffff68edd000; disabling backtracing.
+~/scratch/w7m-suite/apps/clean-architecture-swiftui/omarchy-xtool/Sources/CountriesSwiftUI/CountriesSwiftUI/Core/SystemEventsHandler.swift:54:18: [1;33mwarning: [1;39mweak variable 'permissions' was never mutated; consider changing to 'let' constant[0;0m [#]8;;https://docs.swift.org/compiler/documentation/diagnostics/variable-never-mutated\VariableNeverMutated]8;;\::]8;;https://docs.swift.org/compiler/documentation/diagnostics/weak-mutability\WeakMutability]8;;\]
+ [0;36m52 |[0;0m 
+ [0;36m53 |[0;0m     private func installPushNotificationsSubscriberOnLaunch() {
+ [0;36m54 |[0;0m         weak var permissions = container.interactors.userPermissions
+    [0;36m|[0;0m                  `- [1;33mwarning: [1;39mweak variable 'permissions' was never mutated; consider changing to 'let' constant[0;0m [#]8;;https://docs.swift.org/compiler/documentation/diagnostics/variable-never-mutated\VariableNeverMutated]8;;\::]8;;https://docs.swift.org/compiler/documentation/diagnostics/weak-mutability\WeakMutability]8;;\]
+ [0;36m55 |[0;0m         container.appState
+ [0;36m56 |[0;0m             .updates(for: AppState.permissionKeyPath(for: .pushNotifications))
+
+[#VariableNeverMutated]: <https://docs.swift.org/compiler/documentation/diagnostics/variable-never-mutated>
+[#WeakMutability]: <https://docs.swift.org/compiler/documentation/diagnostics/weak-mutability>
+swift runtime: unable to protect path to swift-backtrace at 0xffff20db5000; disabling backtracing.
+swift runtime: unable to protect environment for swift-backtrace at 0xffff20dad000; disabling backtracing.
+~/scratch/w7m-suite/apps/clean-architecture-swiftui/omarchy-xtool/Sources/CountriesSwiftUI/CountriesSwiftUI/Repositories/Database/CountriesDBRepository.swift:40:10: [1;33mwarning: [1;39mnon-Sendable parameter type 'DBModel.Country' cannot be sent from caller of protocol requirement 'store(countryDetails:for:)' into actor-isolated implementation; this is an error in the Swift 6 language mode[0;0m [#]8;;https://docs.swift.org/compiler/documentation/diagnostics/non-sendable-values-in-async-conformances-and-overrides\NonSendableInAsyncConformanceOrOverride]8;;\]
+[0;36m38 |[0;0m     }
+[0;36m39 |[0;0m 
+[0;36m40 |[0;0m     func store(countryDetails: ApiModel.CountryDetails, for country: DBModel.Country) async throws {
+   [0;36m|[0;0m          `- [1;33mwarning: [1;39mnon-Sendable parameter type 'DBModel.Country' cannot be sent from caller of protocol requirement 'store(countryDetails:for:)' into actor-isolated implementation; this is an error in the Swift 6 language mode[0;0m [#]8;;https://docs.swift.org/compiler/documentation/diagnostics/non-sendable-values-in-async-conformances-and-overrides\NonSendableInAsyncConformanceOrOverride]8;;\]
+[0;36m41 |[0;0m         let alpha3Code = country.alpha3Code
+[0;36m42 |[0;0m         try modelContext.transaction {
+
+~/scratch/w7m-suite/apps/clean-architecture-swiftui/omarchy-xtool/Sources/CountriesSwiftUI/CountriesSwiftUI/Repositories/Models/Country.swift:16:24: [1;39mnote: [1;39mclass 'Country' does not conform to the 'Sendable' protocol[0;0m
+[0;36m14 |[0;0m extension DBModel {
+[0;36m15 |[0;0m 
+[0;36m16 |[0;0m     @Model final class Country {
+   [0;36m|[0;0m                        `- [1;39mnote: [1;39mclass 'Country' does not conform to the 'Sendable' protocol[0;0m
+[0;36m17 |[0;0m 
+[0;36m18 |[0;0m         var name: String
+
+[#NonSendableInAsyncConformanceOrOverride]: <https://docs.swift.org/compiler/documentation/diagnostics/non-sendable-values-in-async-conformances-and-overrides>
+swift runtime: unable to protect path to swift-backtrace at 0xffff084e5000; disabling backtracing.
+swift runtime: unable to protect environment for swift-backtrace at 0xffff084dd000; disabling backtracing.
+~/scratch/w7m-suite/apps/clean-architecture-swiftui/omarchy-xtool/Sources/CountriesSwiftUI/CountriesSwiftUI/Repositories/Database/CountriesDBRepository.swift:40:10: [1;33mwarning: [1;39mnon-Sendable parameter type 'DBModel.Country' cannot be sent from caller of protocol requirement 'store(countryDetails:for:)' into actor-isolated implementation; this is an error in the Swift 6 language mode[0;0m [#]8;;https://docs.swift.org/compiler/documentation/diagnostics/non-sendable-values-in-async-conformances-and-overrides\NonSendableInAsyncConformanceOrOverride]8;;\]
+[0;36m38 |[0;0m     }
+[0;36m39 |[0;0m 
+[0;36m40 |[0;0m     func store(countryDetails: ApiModel.CountryDetails, for country: DBModel.Country) async throws {
+   [0;36m|[0;0m          `- [1;33mwarning: [1;39mnon-Sendable parameter type 'DBModel.Country' cannot be sent from caller of protocol requirement 'store(countryDetails:for:)' into actor-isolated implementation; this is an error in the Swift 6 language mode[0;0m [#]8;;https://docs.swift.org/compiler/documentation/diagnostics/non-sendable-values-in-async-conformances-and-overrides\NonSendableInAsyncConformanceOrOverride]8;;\]
+[0;36m41 |[0;0m         let alpha3Code = country.alpha3Code
+[0;36m42 |[0;0m         try modelContext.transaction {
+
+~/scratch/w7m-suite/apps/clean-architecture-swiftui/omarchy-xtool/Sources/CountriesSwiftUI/CountriesSwiftUI/Repositories/Models/Country.swift:16:24: [1;39mnote: [1;39mclass 'Country' does not conform to the 'Sendable' protocol[0;0m
+[0;36m14 |[0;0m extension DBModel {
+[0;36m15 |[0;0m 
+[0;36m16 |[0;0m     @Model final class Country {
+   [0;36m|[0;0m                        `- [1;39mnote: [1;39mclass 'Country' does not conform to the 'Sendable' protocol[0;0m
+[0;36m17 |[0;0m 
+[0;36m18 |[0;0m         var name: String
+
+[#NonSendableInAsyncConformanceOrOverride]: <https://docs.swift.org/compiler/documentation/diagnostics/non-sendable-values-in-async-conformances-and-overrides>

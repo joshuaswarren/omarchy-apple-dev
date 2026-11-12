@@ -104,15 +104,14 @@ fetch_commit() { # repo sha dir
   fi
 }
 
-# xtool 1.23.0 plus fixes not released yet (xtool-org/xtool#290-#293, #295, #302, all still open
-# upstream): branch-pinned dependencies, `type: .dynamic` package products, extension dylibs kept
-# in the host app (FINDINGS.md 24.1, 27.3, 30), and real source paths for SourceKit-LSP
-# (FINDINGS.md 55). 1.22.2 and later carry xtool-org/xtool#337: before it, `xtool auth` in
-# password mode failed with -80045 because the client info did not match the claimed Mac.
-# Built from source with its Swift runtime libraries next to it
-# ($ORIGIN only), so a toolchain swap or upgrade cannot break it.
+# xtool main at a2875dd (after 1.24.0: the provider user-agent correction xtool-org/xtool#406,
+# the stdin fix #375, the profile fix #430, #422, and #432, which keeps the release build from
+# crashing the compiler since #389, xtool-org/xtool#431) plus the fork's own packaging/build-server
+# fixes, carried in the fork only (upstream #290-#293 and #295 are still open, #302 was closed
+# unmerged). Fork tag omarchy-main-pin, head of joshuaswarren/xtool#4.
+# Built from source with its Swift runtime libraries next to it ($ORIGIN only).
 XTOOL_REPO=https://github.com/joshuaswarren/xtool
-XTOOL_SHA=f300489f3a3fddbd9fb598ba6cf69eb24a494527
+XTOOL_SHA=7cc56c391a67652e86d164eddbbd62065a26599f
 # The SDK stamp that pin writes (SDKBuilder.currentSDKVersion: epoch, darwin-tools and OpenAppleMacros
 # versions). Change it together with XTOOL_SHA; tests/sdk-state/check.sh compares it with the pinned source.
 XTOOL_SDK_VERSION="epoch=4,darwinTools=1.1.0,oam=1.4.1"
@@ -610,10 +609,10 @@ fi
 "$HOME/.local/bin/rcodesign" --version
 # ipsw extracts the Swift runtime dylibs from an iPhone's shared cache for LLDB (device-run.sh
 # --lldb, FINDINGS.md 56); pinned + checksummed.
-IPSW_VERSION=3.1.731
+IPSW_VERSION=3.1.743
 case "$(uname -m)" in
-  aarch64) ipsw_arch=arm64 ipsw_sha=a8d373966d79d24537aa17ec8b9a61bbc73964e6200383f7708c53400ad9f42a ;;
-  x86_64) ipsw_arch=x86_64 ipsw_sha=98e5b127641be3511242a5ba9c5872ef34010e5171318b616e5aa80a607749ff ;;
+  aarch64) ipsw_arch=arm64 ipsw_sha=c7976f40d648ede62bc2d8bb80b5e57ab6365d5ba531a917a3515466a753c21e ;;
+  x86_64) ipsw_arch=x86_64 ipsw_sha=56e9ba754781dfeaa3b84f733ad25e63ef8e2683214a321e06b31a0d85f95e4c ;;
 esac
 if ! "$HOME/.local/bin/ipsw" version 2>/dev/null | grep -q "$IPSW_VERSION"; then
   ipsw_tmp=$(mktemp -d)

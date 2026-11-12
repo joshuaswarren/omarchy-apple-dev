@@ -1,0 +1,95 @@
+// omarchy-apple-dev: Gradle init script of kmp/build-framework.sh.
+//
+// Adds a task, omarchyKmpFrameworks, to every project that applies Kotlin
+// Multiplatform. It builds what the iOS framework of that project is linked
+// from (its klib, the klibs it depends on, the libraries it exports, the
+// Compose resources when there are some), then prints all of it, one item a
+// line, for kmp/build-framework.sh to link the framework with Kotlin/Native outside of
+// Gradle. Gradle itself skips that link on Linux: Kotlin/Native turns Apple
+// targets down when the host is not a Mac.
+//
+// Read from the project, never guessed: the framework the build script
+// declares (binaries.framework), its base name, static or not, its export
+// list, its binary options, its compiler and linker options. The target is
+// the Gradle name given with -PomarchyKmpTarget (iosArm64 by default). The
+// DEBUG framework is read when the project declares one, the RELEASE one
+// otherwise: both share their settings, and kmp/build-framework.sh links an
+// optimized build either way.
+//
+// Output, one line each, tab separated:
+//   VERSION   <Kotlin/Native version>
+//   FRAMEWORK <project path> <build dir> <base name> <static true|false>
+//   INCLUDE   <klib of the project itself>
+//   LIBRARY   <klib it depends on>
+//   EXPORT    <klib it exports>
+//   ARG       <free compiler argument>
+//   LINKER    <linker option>
+//   BINOPT    <framework binary option, key=value, passed as -Xbinary=key=value>
+//   RESOURCES <Compose resources directory of the target>
+//
+// Everything the task prints is read once here, at configuration time, as
+// plain serializable values: with the Gradle configuration cache on, the
+// task's action must not read the project model at run time (issue #150).
+// Read in projectsEvaluated, not afterEvaluate: a project that sets its
+// framework's settings in its own afterEvaluate is then still seen.
+
+// Linux aarch64 (-PomarchyKmpHostArch=amd64, in a fresh JVM): the Kotlin
+// plugin turns every native target off on that host, so it is told x86_64
+// before it loads; kotlin.native.home gives it the aarch64 compiler.
+def hostArch = gradle.startParameter.projectProperties['omarchyKmpHostArch']
+if (hostArch) System.setProperty('os.arch', hostArch)
+
+allprojects { project ->
+    project.gradle.projectsEvaluated {
+        def kotlin = project.extensions.findByName('kotlin')
+        if (kotlin == null || !kotlin.hasProperty('targets')) return
+        def targetName = project.findProperty('omarchyKmpTarget') ?: 'iosArm64'
+        def target = kotlin.targets.findByName(targetName)
+        if (target == null || !target.hasProperty('binaries')) return
+        def frameworks = target.binaries.findAll { it.getClass().name.contains('.Framework') }
+        def framework = frameworks.find { it.buildType.name() == 'DEBUG' } ?: frameworks.find()
+        if (framework == null) return
+
+        def compile = framework.compilation.compileTaskProvider
+        def dependencies = framework.compilation.compileDependencyFiles
+        def exported = project.configurations.getByName(framework.exportConfigurationName)
+        def resourcesTask = project.tasks.findByName("assemble${targetName.capitalize()}MainResources")
+        def resources = project.layout.buildDirectory
+            .dir("generated/compose/resourceGenerator/assembledResources/${targetName}Main").get().asFile
+
+        def version = project.findProperty('kotlin.native.version')
+        if (version == null) {
+            def wrapper = kotlin.getClass().classLoader
+                .loadClass('org.jetbrains.kotlin.gradle.plugin.KotlinPluginWrapperKt')
+            version = wrapper.getMethod('getKotlinPluginVersion', org.gradle.api.Project).invoke(null, project)
+        }
+        def projPath = project.path
+        def buildDir = project.layout.buildDirectory.get().asFile
+        def baseName = framework.baseName
+        def staticFramework = framework.isStatic
+        def include = compile.flatMap { it.outputFile }
+        def libraries = dependencies.elements.map { it.collect { it.asFile } }
+        def exports = exported.elements.map { it.collect { it.asFile } }
+        def compilerArgs = framework.freeCompilerArgs.toList()
+        def linkerOpts = framework.linkerOpts.toList()
+        def binaryOptions = new LinkedHashMap(framework.binaryOptions)
+        def hasResources = resourcesTask != null
+
+        project.tasks.register('omarchyKmpFrameworks') { task ->
+            task.description = 'Builds the inputs of the iOS framework and prints them (omarchy-apple-dev: kmp/build-framework.sh)'
+            task.dependsOn(compile, dependencies, exported)
+            if (hasResources) task.dependsOn(resourcesTask)
+            task.doLast {
+                System.out.println "VERSION\t${version}"
+                System.out.println "FRAMEWORK\t${projPath}\t${buildDir}\t${baseName}\t${staticFramework}"
+                System.out.println "INCLUDE\t${include.get()}"
+                libraries.get().findAll { it.exists() }.each { System.out.println "LIBRARY\t${it}" }
+                exports.get().each { System.out.println "EXPORT\t${it}" }
+                compilerArgs.each { System.out.println "ARG\t${it}" }
+                linkerOpts.each { System.out.println "LINKER\t${it}" }
+                binaryOptions.each { e -> System.out.println "BINOPT\t${e.key}=${e.value}" }
+                if (hasResources && resources.isDirectory()) System.out.println "RESOURCES\t${resources}"
+            }
+        }
+    }
+}
