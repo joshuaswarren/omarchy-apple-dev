@@ -25,6 +25,11 @@
 #                             (the compiler adds its own), other libraries are
 #  13  jar dependencies:      LIBRARY lines naming a .jar (a JVM artifact some
 #                             native artifacts declare) are not passed, klibs are
+#  14  x86_64 host LLVM and libffi: fetched from dependenciesUrl (and the
+#                             <name>.default path) into the data directory and
+#                             marked extracted, reused without a download; a
+#                             failed download stops before the compiler, marks
+#                             nothing
 # Mutants (each must fail its row):
 #   M1  drop `|| return 1` after kmp_distribution -> row 1 goes on to the link
 #   M2  drop the cp check of the Compose resources -> row 4 succeeds
@@ -32,6 +37,8 @@
 #   M4  drop the BINOPT case in kmp_link -> row 8
 #   M5  drop the klib/platform/ skip in kmp_link -> row 10
 #   M6  drop the .jar skip in kmp_link -> row 13
+#   M7  drop `|| return 1` after kmp_x64_deps -> row 14 goes on to the compiler
+#   M8  drop the .extracted mark in kmp_x64_deps -> row 14 downloads again
 # usage: run.sh [path-to-build-framework.sh]   default: ../../kmp/build-framework.sh
 set -uo pipefail
 here=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
@@ -47,7 +54,7 @@ V=9.9.9
 # records the -target and SDK it was given
 linux="$tmp/home/.konan/kotlin-native-prebuilt-linux-x86_64-$V"
 mkdir -p "$linux/bin" "$linux/konan"
-printf 'llvm.linux_x64.user = llvm-x\nlibffiDir.linux_x64 = ffi-x\n' >"$linux/konan/konan.properties"
+printf 'dependenciesUrl = https://dl.example/native\nllvm-x.default = remote:public:resources/llvm/x\nllvm.linux_x64.user = llvm-x\nlibffiDir.linux_x64 = ffi-x\n' >"$linux/konan/konan.properties"
 cat >"$linux/bin/kotlinc-native" <<'SH'
 #!/bin/sh
 out="" target="" sysroot=""
@@ -78,14 +85,29 @@ mkdir -p "$tmp/archives"
 mk_archive "$tmp/archives/good.tgz" ios_arm64 ios_simulator_arm64
 mk_archive "$tmp/archives/partial.tgz" ios_arm64
 
-# curl stand-in: copies $KMP_TEST_ARCHIVE to -o, or fails when it is unset;
-# without -o (SHA256SUMS of the aarch64 release) prints $KMP_TEST_SUMS
+# Host LLVM and libffi archives (x86_64): directories llvm-x and ffi-x
+mkdir -p "$tmp/deps/src/llvm-x" "$tmp/deps/src/ffi-x" "$tmp/deps/none"
+for d in llvm-x ffi-x; do tar -czf "$tmp/deps/$d.tar.gz" -C "$tmp/deps/src" "$d"; done
+
+# curl stand-in: an URL whose file is in $KMP_TEST_DEPS (host LLVM, libffi)
+# gets that file, logged with its URL; otherwise copies $KMP_TEST_ARCHIVE to
+# -o, or fails when it is unset; without -o (SHA256SUMS of the aarch64
+# release) prints $KMP_TEST_SUMS
 mkdir -p "$tmp/bin"
 cat >"$tmp/bin/curl" <<'SH'
 #!/bin/sh
 echo curl >>"$KMP_TEST_LOG/curl"
+dest="" url=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in -o) dest="$2"; shift ;; -*) ;; *) url="$1" ;; esac
+  shift
+done
+if [ -n "$dest" ] && [ -n "${KMP_TEST_DEPS:-}" ] && [ -f "$KMP_TEST_DEPS/${url##*/}" ]; then
+  echo "$url" >>"$KMP_TEST_LOG/deps"
+  cp "$KMP_TEST_DEPS/${url##*/}" "$dest"; exit
+fi
 [ -n "${KMP_TEST_ARCHIVE:-}" ] || exit 22
-while [ "$#" -gt 0 ]; do [ "$1" = -o ] && { cp "$KMP_TEST_ARCHIVE" "$2"; exit; }; shift; done
+[ -n "$dest" ] && { cp "$KMP_TEST_ARCHIVE" "$dest"; exit; }
 cat "${KMP_TEST_SUMS:-/dev/null}"
 SH
 chmod +x "$tmp/bin/curl"
@@ -97,7 +119,7 @@ for p in iPhoneOS iPhoneSimulator; do
 done
 
 export HOME="$tmp/home" XDG_CACHE_HOME="$tmp/cache" XDG_CONFIG_HOME="$tmp/cfg" PATH="$tmp/bin:$PATH"
-export KMP_TEST_LOG="$tmp/log" KMP_HOST=x86_64 KMP_ARM64_VERSION=$V
+export KMP_TEST_LOG="$tmp/log" KMP_HOST=x86_64 KMP_ARM64_VERSION=$V KMP_TEST_DEPS="$tmp/deps"
 mkdir -p "$KMP_TEST_LOG" "$tmp/res/composeResources"
 # shellcheck source=/dev/null
 source "$SCRIPT"
@@ -233,6 +255,27 @@ if kmp_link "$(block "$tmp/b13" "" 'LIBRARY\t/gradle/org.jetbrains/annotations/2
   grep -qx /deps/apollo-api.klib "$KMP_TEST_LOG/library" && ! grep -q '\.jar$' "$KMP_TEST_LOG/library"; then
   ok "row 13: jar dependencies left out of the link, klibs passed"
 else bad "row 13: a jar was passed to the compiler, or a klib dropped"; fi
+# 14 x86_64 host LLVM and libffi: fetched once into the data directory, a failed download stops before the compiler
+data14="$tmp/cache/omarchy-apple-dev/kmp/data/dependencies"
+rm -rf "${data14:?}/llvm-x" "${data14:?}/ffi-x" && sed -i '/^llvm-x$/d;/^ffi-x$/d' "$data14/.extracted"
+reset_logs
+if KMP_TEST_DEPS="$tmp/deps/none" KMP_TEST_ARCHIVE="" kmp_link "$(block "$tmp/b14" "")" ios_arm64 "" true >/dev/null 2>&1 ||
+  [ -e "$KMP_TEST_LOG/kotlinc" ] || grep -qx llvm-x "$data14/.extracted"; then
+  bad "row 14: a failed LLVM download went on to the compiler, or was marked extracted"
+else
+  reset_logs
+  if ! KMP_TEST_ARCHIVE="" kmp_link "$(block "$tmp/b14" "")" ios_arm64 "" true >/dev/null 2>&1 ||
+    ! grep -qx https://dl.example/native/resources/llvm/x/llvm-x.tar.gz "$KMP_TEST_LOG/deps" ||
+    ! grep -qx https://dl.example/native/ffi-x.tar.gz "$KMP_TEST_LOG/deps" ||
+    [ ! -d "$data14/llvm-x" ] || ! grep -qx ffi-x "$data14/.extracted"; then
+    bad "row 14: host LLVM and libffi not fetched from dependenciesUrl, or not extracted and marked"
+  else
+    reset_logs
+    if KMP_TEST_ARCHIVE="" kmp_link "$(block "$tmp/b14" "")" ios_arm64 "" true >/dev/null 2>&1 && [ ! -e "$KMP_TEST_LOG/curl" ]; then
+      ok "row 14: x86_64 LLVM and libffi fetched once from dependenciesUrl, a failed download stops before the compiler"
+    else bad "row 14: host LLVM and libffi downloaded again"; fi
+  fi
+fi
 
 [ "$fail" = 0 ] && echo "kmp-framework: all rows passed" || echo "kmp-framework: FAILED"
 exit "$fail"
