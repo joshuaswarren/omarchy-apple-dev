@@ -1,0 +1,13 @@
+[Unit]
+Description=Tailscale iPad screen for USB device %i
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/ipad-screen run --udid %i
+KillMode=control-group
+TimeoutStopSec=15
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target
