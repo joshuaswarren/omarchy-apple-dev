@@ -826,7 +826,8 @@ class Generator:
             lo, hi = req["minimumVersion"], bump_minor(req["minimumVersion"])
             return f"{sw_sy(lo)}..<{sw_sy(hi)}"
         if kind == "exactVersion":
-            return f"exact: {sw_sy(req['exactVersion'])}"
+            # Xcode writes the pinned version under `version`; `exactVersion` kept for hand-written projects
+            return f"exact: {sw_sy(req.get('version', req.get('exactVersion', '')))}"
         if kind == "versionRange":
             return f"{sw_sy(req['minimumVersion'])}..<{sw_sy(req['maximumVersion'])}"
         if kind == "branch":
@@ -2388,6 +2389,7 @@ SELF_TEST_PROJ = r"""// !$*UTF8*$!
 			packageProductDependencies = (
 				FFFF00000000000000000001 /* Logging */,
 				FFFF00000000000000000002 /* Branchy */,
+				FFFF00000000000000000004 /* Exacty */,
 				FFFF00000000000000000003 /* DemoLib */,
 			);
 			productName = DemoApp;
@@ -2422,6 +2424,7 @@ SELF_TEST_PROJ = r"""// !$*UTF8*$!
 			packageReferences = (
 				EEEE0000000000000000000A /* XCRemoteSwiftPackageReference "swift-log" */,
 				EEEE0000000000000000000B /* XCRemoteSwiftPackageReference "Branchy" */,
+				EEEE00000000000000000014 /* XCRemoteSwiftPackageReference "Exacty" */,
 				EEEE00000000000000000013 /* XCLocalSwiftPackageReference "DemoPkg" */,
 			);
 			targets = (
@@ -2546,6 +2549,14 @@ SELF_TEST_PROJ = r"""// !$*UTF8*$!
 				kind = branch;
 			};
 		};
+		EEEE00000000000000000014 /* XCRemoteSwiftPackageReference "Exacty" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://example.com/exacty.git";
+			requirement = {
+				kind = exactVersion;
+				version = 1.0.3;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCLocalSwiftPackageReference section */
@@ -2565,6 +2576,11 @@ SELF_TEST_PROJ = r"""// !$*UTF8*$!
 			isa = XCSwiftPackageProductDependency;
 			package = EEEE0000000000000000000B /* XCRemoteSwiftPackageReference "Branchy" */;
 			productName = Branchy;
+		};
+		FFFF00000000000000000004 /* Exacty */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = EEEE00000000000000000014 /* XCRemoteSwiftPackageReference "Exacty" */;
+			productName = Exacty;
 		};
 		FFFF00000000000000000003 /* DemoLib */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -2693,6 +2709,8 @@ def _self_test(root):
         ("tools-version", "// swift-tools-version: 6.2" in pkg),
         ("platform", '.iOS("16.4")' in pkg),
         ("upToNextMinor range", '"1.5.3"..<"1.6.0"' in pkg),
+        ("exact version as Xcode writes it",
+         '.package(url: "https://example.com/exacty.git", exact: "1.0.3")' in pkg),
         ("branch requirement preserved",
          '.package(url: "https://example.com/branchy.git", branch: "main")' in pkg),
         ("branch requirement has no warning", "cannot build branch" not in warnings_text),
