@@ -830,8 +830,12 @@ class Generator:
         if kind == "versionRange":
             return f"{sw_sy(req['minimumVersion'])}..<{sw_sy(req['maximumVersion'])}"
         if kind == "branch":
+            if revs.get(ident):
+                self.warn(f"{url} is pinned to branch {req.get('branch', '')!r}: the build follows the branch head, "
+                          f"not the Package.resolved commit {revs[ident][:8]} that Xcode built")
             return f"branch: {sw_sy(req.get('branch', ''))}"
-            return f"revision: {sw_sy(req.get('revision', ''))}"
+        if kind == "revision" and req.get("revision"):
+            return f"revision: {sw_sy(req['revision'])}"
         rev = revs.get(ident)
         if rev:
             self.warn(f"no requirement kind for {url}; pinned to Package.resolved revision")
@@ -2594,6 +2598,7 @@ def self_test():
         _self_test(root)
         _self_test_collision(root)
         _self_test_intent(root)
+        _self_test_requirement(root)
     except BaseException:
         # weakref.finalize would delete a TemporaryDirectory at exit even when
         # referenced, so keep the dir by simply not removing it
@@ -3312,6 +3317,50 @@ def _self_test_intent(root):
         raise SystemExit("intent self-test FAILED: " + "; ".join(failed))
     print("intent self-test passed "
           f"({len(checks)} checks, present={present})")
+
+
+def _self_test_requirement(root):
+    """A package pinned in Xcode by revision ("Commit" rule, kind = revision) must give `revision:` with the
+    commit Xcode stores in the project, with no warning. A branch pin keeps `branch:`, and says when Xcode's
+    Package.resolved holds a commit for it, because the build then follows the branch head, not that commit."""
+    proj = os.path.join(root, "ReqApp.xcodeproj")
+    os.makedirs(proj)
+    with open(os.path.join(proj, "project.pbxproj"), "w") as f:
+        f.write(COLLISION_PROJ)
+    gen = Generator(proj, out_dir=os.path.join(root, "gen-req"))
+    url = "https://github.com/airbnb/HorizonCalendar"
+    resolved = {"horizoncalendar": "9999999999999999999999999999999999999999"}
+    pinned = {"repositoryURL": url, "requirement": {"kind": "revision", "revision": "a1b2c3d4e5f6"}}
+    no_value = {"repositoryURL": url, "requirement": {"kind": "revision"}}
+    on_branch = {"repositoryURL": url, "requirement": {"kind": "branch", "branch": "master"}}
+
+    def run(ref, revs):
+        gen.warnings = []
+        return gen.requirement(ref, revs), list(gen.warnings)
+
+    got, warned = run(pinned, resolved)
+    checks = [("revision pin uses the project's commit", got == 'revision: "a1b2c3d4e5f6"'),
+              ("revision pin has no warning", warned == [])]
+    got, warned = run(pinned, {})
+    checks += [("revision pin without Package.resolved", got == 'revision: "a1b2c3d4e5f6"'),
+               ("revision pin without Package.resolved has no warning", warned == [])]
+    got, warned = run(no_value, resolved)
+    checks += [("revision pin with no commit falls back to Package.resolved",
+                got == 'revision: "9999999999999999999999999999999999999999"'),
+               ("that fallback warns", len(warned) == 1)]
+    got, warned = run(no_value, {})
+    checks += [("revision pin with no commit and no Package.resolved is skipped", got is None),
+               ("that skip warns", len(warned) == 1)]
+    got, warned = run(on_branch, resolved)
+    checks += [("branch pin keeps the branch", got == 'branch: "master"'),
+               ("branch pin names the Package.resolved commit it does not follow",
+                len(warned) == 1 and url in warned[0] and "master" in warned[0] and "99999999" in warned[0])]
+    got, warned = run(on_branch, {})
+    checks += [("branch pin without Package.resolved has no warning", got == 'branch: "master"' and warned == [])]
+    failed = [n for n, ok in checks if not ok]
+    if failed:
+        raise SystemExit("requirement self-test FAILED: " + "; ".join(failed))
+    print(f"requirement self-test passed ({len(checks)} checks)")
 
 
 # Minimal classic-group app for the launch-storyboard transform: sources under
