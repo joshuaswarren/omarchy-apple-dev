@@ -184,8 +184,9 @@ kmp_arm64_deps() {
 # before 21 then looks for jdk.net.MacOSXSocketOptions on its first connection
 # and fails (ClassNotFoundException); JDK 21 and later pick the platform at
 # build time. Unlike the aarch64 archives, nothing is checked here beyond HTTPS
-# to the JetBrains server: JetBrains publishes no digests for them, and the
-# compiler itself fetches them the same way.
+# to the JetBrains server, as the compiler itself does: the server has a .sha256
+# next to each archive, but the one of libffi-3.2.1-2-linux-x86-64 does not match
+# the archive it serves (2026-11-14), so checking them would refuse it.
 kmp_x64_deps() {
   local deps="$1/dependencies" props="$2" base dep sub url
   shift 2
