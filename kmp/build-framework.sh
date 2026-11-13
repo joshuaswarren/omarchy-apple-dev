@@ -183,7 +183,9 @@ kmp_arm64_deps() {
 # here rather than by the compiler: it runs with os.name=Mac OS X, and a JDK
 # before 21 then looks for jdk.net.MacOSXSocketOptions on its first connection
 # and fails (ClassNotFoundException); JDK 21 and later pick the platform at
-# build time.
+# build time. Unlike the aarch64 archives, nothing is checked here beyond HTTPS
+# to the JetBrains server: JetBrains publishes no digests for them, and the
+# compiler itself fetches them the same way.
 kmp_x64_deps() {
   local deps="$1/dependencies" props="$2" base dep sub url
   shift 2

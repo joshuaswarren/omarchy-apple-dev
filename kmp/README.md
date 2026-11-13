@@ -40,7 +40,10 @@ with `compose-resources/` next to it when the project has some, and
 `<Name>.xcframework` with `--xcframework`. `--target ios_simulator_arm64`
 links for the simulator (xcframework slice `ios-arm64-simulator`). The first run takes the iOS runtime of the macOS
 Kotlin/Native distribution from Maven Central (about 300 MB, kept in
-`~/.cache/omarchy-apple-dev/kmp`); the link itself takes a few minutes.
+`~/.cache/omarchy-apple-dev/kmp`) and, on x86_64, LLVM and libffi for the host
+from the JetBrains server the compiler uses (about 580 MB extracted, in the same
+cache; over HTTPS, with no pinned digest, as the compiler would fetch them); the
+link itself takes a few minutes.
 
 - The build is optimized and has no debug info: the Linux LLVM asserts on the
   debug info of Apple targets.
