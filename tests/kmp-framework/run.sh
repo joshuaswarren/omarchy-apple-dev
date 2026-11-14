@@ -28,8 +28,9 @@
 #  14  x86_64 host LLVM and libffi: fetched from dependenciesUrl (and the
 #                             <name>.default path) into the data directory and
 #                             marked extracted, reused without a download; a
-#                             failed download stops before the compiler, marks
-#                             nothing
+#                             failed download, a digest mismatch or an archive
+#                             with no pinned digest stops before the compiler,
+#                             extracts and marks nothing
 # Mutants (each must fail its row):
 #   M1  drop `|| return 1` after kmp_distribution -> row 1 goes on to the link
 #   M2  drop the cp check of the Compose resources -> row 4 succeeds
@@ -39,6 +40,7 @@
 #   M6  drop the .jar skip in kmp_link -> row 13
 #   M7  drop `|| return 1` after kmp_x64_deps -> row 14 goes on to the compiler
 #   M8  drop the .extracted mark in kmp_x64_deps -> row 14 downloads again
+#   M9  drop the digest comparison in kmp_x64_deps -> row 14 extracts a mismatch
 # usage: run.sh [path-to-build-framework.sh]   default: ../../kmp/build-framework.sh
 set -uo pipefail
 here=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
@@ -88,6 +90,9 @@ mk_archive "$tmp/archives/partial.tgz" ios_arm64
 # Host LLVM and libffi archives (x86_64): directories llvm-x and ffi-x
 mkdir -p "$tmp/deps/src/llvm-x" "$tmp/deps/src/ffi-x" "$tmp/deps/none"
 for d in llvm-x ffi-x; do tar -czf "$tmp/deps/$d.tar.gz" -C "$tmp/deps/src" "$d"; done
+(cd "$tmp/deps" && sha256sum llvm-x.tar.gz ffi-x.tar.gz) >"$tmp/deps.sums"
+sed 's/^[0-9a-f]\{8\}/00000000/' "$tmp/deps.sums" >"$tmp/deps.sums.bad"
+grep ffi-x "$tmp/deps.sums" >"$tmp/deps.sums.ffi-only"
 
 # curl stand-in: an URL whose file is in $KMP_TEST_DEPS (host LLVM, libffi)
 # gets that file, logged with its URL; otherwise copies $KMP_TEST_ARCHIVE to
@@ -119,7 +124,7 @@ for p in iPhoneOS iPhoneSimulator; do
 done
 
 export HOME="$tmp/home" XDG_CACHE_HOME="$tmp/cache" XDG_CONFIG_HOME="$tmp/cfg" PATH="$tmp/bin:$PATH"
-export KMP_TEST_LOG="$tmp/log" KMP_HOST=x86_64 KMP_ARM64_VERSION=$V KMP_TEST_DEPS="$tmp/deps"
+export KMP_TEST_LOG="$tmp/log" KMP_HOST=x86_64 KMP_ARM64_VERSION=$V KMP_TEST_DEPS="$tmp/deps" KMP_X64_SUMS="$tmp/deps.sums"
 mkdir -p "$KMP_TEST_LOG" "$tmp/res/composeResources"
 # shellcheck source=/dev/null
 source "$SCRIPT"
@@ -262,6 +267,15 @@ reset_logs
 if KMP_TEST_DEPS="$tmp/deps/none" KMP_TEST_ARCHIVE="" kmp_link "$(block "$tmp/b14" "")" ios_arm64 "" true >/dev/null 2>&1 ||
   [ -e "$KMP_TEST_LOG/kotlinc" ] || grep -qx llvm-x "$data14/.extracted"; then
   bad "row 14: a failed LLVM download went on to the compiler, or was marked extracted"
+elif reset_logs; out=$(KMP_X64_SUMS="$tmp/deps.sums.bad" KMP_TEST_ARCHIVE="" kmp_link "$(block "$tmp/b14" "")" ios_arm64 "" true 2>&1) ||
+  [ -e "$KMP_TEST_LOG/kotlinc" ] || [ -e "$data14/llvm-x" ] || [ -e "$data14/llvm-x.tar.gz" ] ||
+  grep -qx llvm-x "$data14/.extracted" || ! grep -q "llvm-x.tar.gz does not match" <<<"$out" ||
+  ! grep -q "expected 00000000" <<<"$out" || ! grep -q "got $(cut -c1-64 "$tmp/deps.sums" | head -1)" <<<"$out"; then
+  bad "row 14: an archive that does not match its digest went on, was kept, extracted or marked, or the message lacks the file or both digests: $out"
+elif reset_logs; out=$(KMP_X64_SUMS="$tmp/deps.sums.ffi-only" KMP_TEST_ARCHIVE="" kmp_link "$(block "$tmp/b14" "")" ios_arm64 "" true 2>&1) ||
+  [ -e "$KMP_TEST_LOG/kotlinc" ] || [ -e "$KMP_TEST_LOG/curl" ] || [ -e "$data14/llvm-x" ] ||
+  ! grep -q "no pinned checksum for llvm-x.tar.gz" <<<"$out" || ! grep -q KMP_X64_SUMS <<<"$out"; then
+  bad "row 14: an archive with no pinned digest was fetched or went on, or the message does not name KMP_X64_SUMS: $out"
 else
   reset_logs
   if ! KMP_TEST_ARCHIVE="" kmp_link "$(block "$tmp/b14" "")" ios_arm64 "" true >/dev/null 2>&1 ||
@@ -272,7 +286,7 @@ else
   else
     reset_logs
     if KMP_TEST_ARCHIVE="" kmp_link "$(block "$tmp/b14" "")" ios_arm64 "" true >/dev/null 2>&1 && [ ! -e "$KMP_TEST_LOG/curl" ]; then
-      ok "row 14: x86_64 LLVM and libffi fetched once from dependenciesUrl, a failed download stops before the compiler"
+      ok "row 14: x86_64 LLVM and libffi fetched once from dependenciesUrl and checked; a failed download, a mismatch or a missing pin stops before the compiler"
     else bad "row 14: host LLVM and libffi downloaded again"; fi
   fi
 fi
