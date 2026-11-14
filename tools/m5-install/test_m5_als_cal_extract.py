@@ -3,10 +3,9 @@
 
 python3 tools/m5-install/test_m5_als_cal_extract.py
 Stdlib only. No root, no hardware, no real captures, no real calibration
-bytes or digest. Synthetic 193-byte payload; success paths inject the
-synthetic digest through internal seams only (pure-function parameter or
-in-process module constant) — never a CLI flag. Refusal paths run the
-real subprocess against the real pin.
+bytes. Synthetic 193-byte payloads throughout; any valid Mac17,11 payload
+is accepted, so success and refusal paths both run the real parser, CLI,
+and install boundary.
 
 CLI contract: m5_als_cal_extract.py CAPTURE CAPTURE -o OUTPUT
 Exactly two agreeing captures, required explicit -o, no other options.
@@ -30,8 +29,6 @@ TOOL = os.path.join(HERE, "m5_als_cal_extract.py")
 SYN = bytes(((i * 7 + 3) & 0xFF) for i in range(193))
 assert len(SYN) == ext.EXPECTED_LEN
 SYN_HEX = SYN.hex()
-SYN_DIGEST = hashlib.sha256(SYN).hexdigest()
-assert SYN_DIGEST != ext.EXPECTED_SHA256
 assert SYN_HEX[:32] not in open(TOOL, encoding="utf-8").read()  # no literals
 
 ROOT = "+-o Root  <class IORegistryEntry, id 0x100000100, retain 10>\n"
@@ -97,18 +94,13 @@ def run_cli(args):
 
 
 def run_cli_inproc(args):
-    """Real main() in-process with the internal digest constant swapped to
-    the synthetic device identity (no CLI flag exists for it)."""
-    old = ext.EXPECTED_SHA256
-    ext.EXPECTED_SHA256 = SYN_DIGEST
+    """ext.main() in-process; argparse exits surface as SystemExit."""
     out, err = io.StringIO(), io.StringIO()
     try:
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             rc = ext.main(list(args))
     except SystemExit as e:  # argparse errors
         rc = e.code
-    finally:
-        ext.EXPECTED_SHA256 = old
     return rc, out.getvalue(), err.getvalue()
 
 
@@ -137,7 +129,7 @@ def assert_no_temps(d, keep=()):
     assert not leftovers, "temp files left behind: %r" % leftovers
 
 
-# --- success paths (synthetic; digest via internal seam) -------------------
+# --- success paths (synthetic) ---------------------------------------------
 
 @check("success_two_agreeing_captures_idempotent")
 def t1():
@@ -182,19 +174,6 @@ def t2():
         assert_no_temps(d)
     finally:
         shutil.rmtree(d)
-
-
-@check("pure_function_digest_injection")
-def t3():
-    got = ext.parse_capture_text(fixture(), expected_digest=SYN_DIGEST)
-    assert got.payload == SYN
-    assert got.sha256 == SYN_DIGEST
-    assert len(got.payload) == ext.EXPECTED_LEN
-    try:
-        ext.parse_capture_text(fixture(), expected_digest="0" * 64)
-        raise AssertionError("injected wrong digest accepted")
-    except ext.CalError:
-        pass
 
 
 # --- fail closed: malformed / identity / duplicates / count ----------------
@@ -272,20 +251,25 @@ def t8():
         shutil.rmtree(d)
 
 
-@check("cli_pinned_hash_rejects_foreign_193b")
+@check("cli_accepts_foreign_valid_193b")
 def t9():
+    # A foreign but valid 193-byte payload in two agreeing captures must
+    # install through the real subprocess CLI with exactly those bytes.
     d = tmpdir()
     try:
         out = os.path.join(d, "aop-als-cal.bin")
         foreign = bytes(((i * 11 + 5) & 0xFF) for i in range(193))
-        assert hashlib.sha256(foreign).hexdigest() != ext.EXPECTED_SHA256
         c = wfpair(d, fixture(payload_hex=foreign.hex()), "fh.txt")
         r = run_cli([c, c, "-o", out])
-        assert r.returncode != 0 and not os.path.exists(out)
-        r = run_cli([c, c, "-o", out, "--expected-digest", SYN_DIGEST])
-        assert r.returncode != 0 and not os.path.exists(out)
+        assert r.returncode == 0, "exit %s: %s" % (r.returncode, r.stderr)
+        assert open(out, "rb").read() == foreign
+        assert stat.S_IMODE(os.stat(out).st_mode) == 0o600
+        assert ("sha256=%s" % hashlib.sha256(foreign).hexdigest()) in r.stdout
+        assert_no_temps(d)
+        r = run_cli([c, c, "-o", out, "--expected-digest", "0" * 64])
+        assert r.returncode != 0
         r = run_cli([c, c])  # missing -o
-        assert r.returncode != 0 and not os.path.exists(out)
+        assert r.returncode != 0
     finally:
         shutil.rmtree(d)
 
@@ -309,8 +293,7 @@ def t18():
     # Regression: absent CalibrationData key must fail closed as CalError,
     # never leak an uncaught KeyError.
     try:
-        ext.parse_capture_text(fixture(data_key="SomeOtherKey"),
-                               expected_digest=SYN_DIGEST)
+        ext.parse_capture_text(fixture(data_key="SomeOtherKey"))
         raise AssertionError("missing CalibrationData accepted")
     except ext.CalError:
         pass
@@ -329,7 +312,7 @@ def t19():
     # Regression: exactly one IOPlatformExpertDevice is acceptable; a
     # second (ambiguous captured root) must fail closed.
     try:
-        ext.parse_capture_text(fixture(nplat=2), expected_digest=SYN_DIGEST)
+        ext.parse_capture_text(fixture(nplat=2))
         raise AssertionError("duplicate platform node accepted")
     except ext.CalError:
         pass
@@ -345,7 +328,7 @@ def t20():
         c3 = wfpair(d, fixture(), "c.txt")
         for paths in ([c1], [c1, c2, c3]):
             try:
-                ext.extract_from_files(paths, expected_digest=SYN_DIGEST)
+                ext.extract_from_files(paths)
                 raise AssertionError("capture count %d accepted" % len(paths))
             except ext.CalError:
                 pass
@@ -396,7 +379,7 @@ def t12():
 def t13():
     # Regression of the private-success rule: an existing file readable by
     # group/other must be refused at the write boundary even if the bytes
-    # would match. Direct install_payload call: no digest gate in front.
+    # would match. Direct install_payload call.
     d = tmpdir()
     try:
         out = wfile(os.path.join(d, "aop-als-cal.bin"), SYN, mode=0o644)
@@ -726,7 +709,7 @@ def t27():
             + PLAT_CLOSE)
     header = VD_HDR.format(name=ext.EXPECTED_NODE, cls=ext.EXPECTED_NODE)
     try:
-        ext.parse_capture_text(ROOT + plat + header, expected_digest=SYN_DIGEST)
+        ext.parse_capture_text(ROOT + plat + header)
         raise AssertionError("missing block opener accepted")
     except ext.CalError as e:
         assert "no property block" in str(e)
@@ -735,7 +718,7 @@ def t27():
     for tail in ("", " " * col + "\n", " " * col + "|\n"):
         text = ROOT + plat + header + VD_OPEN + prop(VD_PP, "Calibrated", "Yes") + tail
         try:
-            ext.parse_capture_text(text, expected_digest=SYN_DIGEST)
+            ext.parse_capture_text(text)
             raise AssertionError("unterminated block accepted: %r" % tail)
         except ext.CalError as e:
             assert "unterminated property block" in str(e)
@@ -744,7 +727,7 @@ def t27():
              "<class Child, id 0x1, registered, matched, active, busy 0 (0 ms), retain 1>\n")
     text = ROOT + plat + header + VD_OPEN + child + prop(VD_PP, "Calibrated", "Yes") + VD_CLOSE
     try:
-        ext.parse_capture_text(text, expected_digest=SYN_DIGEST)
+        ext.parse_capture_text(text)
         raise AssertionError("nested node accepted")
     except ext.CalError as e:
         assert "nested node" in str(e)
@@ -763,14 +746,13 @@ def t28():
     )
     for text, phrase in cases:
         try:
-            ext.parse_capture_text(text, expected_digest=SYN_DIGEST)
+            ext.parse_capture_text(text)
             raise AssertionError("malformed input accepted: %s" % phrase)
         except ext.CalError as e:
             assert phrase in str(e), (phrase, str(e))
 @check("writable_parent_and_required_output_direct")
 def t29():
-    # Hit output validation directly with synthetic bytes; a CLI subprocess
-    # would stop earlier at the real digest check.
+    # Hit output validation directly with synthetic bytes.
     d = tmpdir()
     try:
         c1 = wfpair(d, fixture(), "a.txt")

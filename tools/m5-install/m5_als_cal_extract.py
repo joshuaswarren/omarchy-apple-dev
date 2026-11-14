@@ -18,7 +18,6 @@ import sys
 EXPECTED_MODEL = "Mac17,11"
 EXPECTED_NODE = "AppleSPUVD6286"
 EXPECTED_LEN = 193
-EXPECTED_SHA256 = "6012df8764786c2c75f91a97f59378fb908cda362362feca44403221bd3e6853"
 
 NODE_RE = re.compile(r"^[| ]*\+-o (\S+)\s+<class ([^,>]+),")
 KEY_RE = re.compile(r'^[| ]*"([^"]+)"\s*=\s*(.*)$')
@@ -98,10 +97,8 @@ def _decode_blob(first_val, lines, idx):
         raise CalError("invalid hex")
 
 
-def parse_capture_text(text, expected_digest=None):
-    """Validate captured identity and payload; digest injection is internal."""
-    if expected_digest is None:
-        expected_digest = EXPECTED_SHA256
+def parse_capture_text(text):
+    """Validate captured identity and payload."""
     lines = text.splitlines()
     platforms = _nodes(lines, cls="IOPlatformExpertDevice")
     if len(platforms) != 1:
@@ -129,32 +126,27 @@ def parse_capture_text(text, expected_digest=None):
                            keylines["CalibrationData"])
     if len(payload) != EXPECTED_LEN:
         raise CalError("calibration length %d != %d" % (len(payload), EXPECTED_LEN))
-    parsed = Parsed(payload)
-    if parsed.sha256 != expected_digest:
-        raise CalError("calibration digest mismatch")
-    return parsed
+    return Parsed(payload)
 
 
-def _read_capture(path, expected_digest):
+def _read_capture(path):
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as f:
             text = f.read()
     except OSError as e:
         raise CalError("cannot read capture %s: %s"
                        % (os.path.basename(path), e.__class__.__name__))
-    return parse_capture_text(text, expected_digest)
+    return parse_capture_text(text)
 
 
-def extract_from_files(paths, expected_digest=None):
+def extract_from_files(paths):
     """Parse exactly two captures and return their shared payload."""
-    if expected_digest is None:
-        expected_digest = EXPECTED_SHA256
     paths = tuple(paths)
     if len(paths) != 2:
         raise CalError("expected exactly two capture inputs, got %d" % len(paths))
     first_path, second_path = paths
-    first = _read_capture(first_path, expected_digest)
-    second = _read_capture(second_path, expected_digest)
+    first = _read_capture(first_path)
+    second = _read_capture(second_path)
     if first.payload != second.payload:
         raise CalError("captures disagree")
     return first
