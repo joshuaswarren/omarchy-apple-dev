@@ -7,7 +7,7 @@ import ssl
 import threading
 import fcntl
 import importlib.metadata
-import ipaddress
+import tempfile
 import json
 import os
 from pathlib import Path
@@ -65,14 +65,6 @@ def run(args, timeout=60):
                 child.wait(timeout=5)
 
 
-def tailnet_ip():
-    value = run(['tailscale', 'ip', '-4']).strip()
-    address = ipaddress.IPv4Address(value)
-    if address not in ipaddress.IPv4Network((0x64400000, 10)):
-        raise RuntimeError('tailscale did not return a single Tailscale IPv4 address')
-    return str(address)
-
-
 def version_ok():
     from packaging.version import Version
     try:
@@ -101,6 +93,98 @@ def identity(pid):
     return fields[19]
 
 
+def publish(data):
+    fd, name = tempfile.mkstemp(prefix='.process-', dir=STATE)
+    try:
+        with os.fdopen(fd, 'w') as stream:
+            json.dump(data, stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(name, STATE / 'process.json')
+        directory = os.open(STATE, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        Path(name).unlink(missing_ok=True)
+
+
+def lock_held():
+    with open(STATE / 'lock', 'a') as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        return False
+
+
+def stop_worker():
+    signalled = None
+    for _ in range(100):
+        data = current()
+        if data and (data['pid'], data['starttime']) != signalled:
+            os.kill(data['pid'], signal.SIGTERM)
+            signalled = (data['pid'], data['starttime'])
+        if not lock_held():
+            print('ipad-screen: stopped')
+            return
+        time.sleep(0.1)
+    raise RuntimeError('viewer is still starting/running; stop could not confirm exit')
+
+
+def serve_cli(*args):
+    result = subprocess.run(['tailscale', *args], capture_output=True, text=True, timeout=20)
+    if result.returncode:
+        raise RuntimeError('Tailscale Serve unavailable or permission denied; an administrator must grant this account operator access with tailscale set --operator=<ACCOUNT>; no preferences were changed')
+    return result.stdout
+
+
+def serve_config():
+    return json.loads(serve_cli('serve', 'status', '--json'))
+
+
+def port_config(config, port):
+    # Check node background and foreground configurations, including public mappings.
+    found = {}
+    for section in ('TCP', 'Web', 'AllowFunnel'):
+        values = {k: v for k, v in config.get(section, {}).items()
+                  if str(k) == str(port) or str(k).endswith(':' + str(port))}
+        if values:
+            found[section] = values
+    for key, child in config.get('Foreground', {}).items():
+        nested = port_config(child, port)
+        if nested:
+            found[key] = nested
+    return found
+
+
+def serve_add(data):
+    if port_config(serve_config(), data['port']):
+        raise RuntimeError('viewer Serve port already configured; choose an unused port')
+    info = json.loads(serve_cli('status', '--json'))
+    host = info['Self']['DNSName'].rstrip('.')
+    data['served_bind'] = host
+    # Publish intent first, so cleanup can recover if configuration succeeds before interruption.
+    data['serve_owned'] = True
+    publish(data)
+    serve_cli('serve', '--bg', '--yes', '--https=' + str(data['port']),
+              'https+insecure://127.0.0.1:' + str(data['port']))
+
+
+def serve_remove(data):
+    if not data.get('serve_owned'):
+        return
+    selected = port_config(serve_config(), data['port'])
+    expected = {'TCP': {str(data['port']): {'HTTPS': True}},
+                'Web': {data['served_bind'] + ':' + str(data['port']):
+                        {'Handlers': {'/': {'Proxy': 'https+insecure://127.0.0.1:' + str(data['port'])}}}}}
+    if selected == expected:
+        serve_cli('serve', '--https=' + str(data['port']), 'off')
+    elif selected:
+        raise RuntimeError('viewer Serve mapping changed externally; refusing to remove it')
+
+
 def current():
     try:
         data = json.loads((STATE / 'process.json').read_text())
@@ -121,7 +205,7 @@ def ready(data):
 
 def auth_status(data, secret=None):
     connection = http.client.HTTPSConnection(data['bind'], data['port'], timeout=2,
-                                            context=ssl._create_unverified_context())
+                                            context=ssl.create_default_context() if data.get('trusted') else ssl._create_unverified_context())
     headers = {}
     if secret is not None:
         token = base64.b64encode(('viewer:' + secret).encode()).decode()
@@ -156,14 +240,19 @@ def auth_guard(data, secret):
         for _ in range(400):
             if ready(data):
                 verify_auth(data, secret)
+                serve_add(data)
+                verify_auth(dict(bind=data['served_bind'], port=data['port'], trusted=True), secret)
                 data['verified'] = True
-                (STATE / 'process.json').write_text(json.dumps(data))
+                publish(data)
                 return
             time.sleep(1)
-    except (RuntimeError, OSError, http.client.HTTPException):
-        pass
+    except (RuntimeError, OSError, http.client.HTTPException) as error:
+        (STATE / 'startup-error').write_text(str(error) if isinstance(error, RuntimeError) else 'authentication transport failed')
     # Immediate nonzero exit also releases the lifetime lock; never leave an open viewer.
-    os._exit(1)
+    try:
+        serve_remove(data)
+    finally:
+        os._exit(1)
 
 
 def worker(args):
@@ -175,16 +264,16 @@ def worker(args):
             raise RuntimeError('viewer is already starting/running')
         signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
         data = dict(pid=os.getpid(), starttime=identity(os.getpid()))
-        (STATE / 'process.json').write_text(json.dumps(data))
+        publish(data)
         secret = password()
-        bind = tailnet_ip()
+        bind = '127.0.0.1'
         ensure_version(False)
         # Fail before contacting the device if the port is already occupied.
         with socket.socket() as probe:
             probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             probe.bind((bind, args.port))
         data = dict(pid=os.getpid(), starttime=identity(os.getpid()), bind=bind, port=args.port)
-        (STATE / 'process.json').write_text(json.dumps(data))
+        publish(data)
         try:
             os.environ['PYMOBILEDEVICE3_UDID'] = args.udid
             # Do not inherit a remote target or an alternate tunnel transport.
@@ -209,6 +298,7 @@ def worker(args):
                           '--bind', bind, '--http-port', str(args.port), '--https'],
                     default_map={'developer': {'core-device': {'display': {'serve-web': {'password': secret}}}}})
         finally:
+            serve_remove(data)
             (STATE / 'process.json').unlink(missing_ok=True)
 
 
@@ -221,6 +311,10 @@ def main():
     args = parser.parse_args()
     os.umask(0o077)
     if args.command == 'install':
+        password()
+        private_dir(STATE)
+        for upstream in (Path.home() / '.pymobiledevice3', Path.home() / '.local/share/pymobiledevice3', Path.home() / '.cache/pymobiledevice3'):
+            upstream.mkdir(parents=True, exist_ok=True, mode=0o700)
         binary = Path.home() / '.local/bin/ipad-screen'
         binary.parent.mkdir(parents=True, exist_ok=True)
         if binary.exists() and not binary.is_symlink():
@@ -250,25 +344,17 @@ def main():
         return
     private_dir(STATE)
     if args.command == 'stop':
-        data = current()
-        if data:
-            os.kill(data['pid'], signal.SIGTERM)
-            for _ in range(100):
-                if not current():
-                    print('ipad-screen: stopped')
-                    return
-                time.sleep(0.1)
-            raise RuntimeError('viewer has not exited; no forced kill attempted')
-        print('ipad-screen: stopped')
+        stop_worker()
         return
     if args.command == 'status':
         data = current()
-        print(f"ipad-screen: {'ready' if data.get('verified') and ready(data) else 'starting'} https://{data.get('bind', 'pending')}:{data.get('port', 'pending')}/" if data else 'ipad-screen: stopped')
+        print(f"ipad-screen: {'ready' if data.get('verified') and ready(data) else 'starting'} https://{data.get('served_bind', 'pending')}:{data.get('port', 'pending')}/" if data else 'ipad-screen: stopped')
         return
     if not args.udid:
         parser.error('--udid or IPAD_SCREEN_UDID is required; no implicit first-device selection')
     if not 1024 <= args.port <= 65535:
         parser.error('--port must be between 1024 and 65535')
+    (STATE / 'startup-error').unlink(missing_ok=True)
     ensure_version(args.upgrade)
     if args.command == 'run':
         worker(args)
@@ -276,16 +362,15 @@ def main():
     if current():
         raise RuntimeError('viewer is already starting/running; use status or stop')
     password()
-    tailnet_ip()
     with open(STATE / 'viewer.log', 'w') as log:
         child = subprocess.Popen([sys.executable, str(SELF), 'run', '--udid', args.udid, '--port', str(args.port)],
                                  stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
     for _ in range(400):
         if child.poll() is not None:
-            raise RuntimeError('startup failed; check private viewer.log. If locked/untrusted, the person holding the iPad must unlock/tap Trust on the iPad, then retry')
+            raise RuntimeError((STATE / 'startup-error').read_text() if (STATE / 'startup-error').exists() else 'startup failed; check private viewer.log and device trust/unlock')
         data = current()
         if data and data['pid'] == child.pid and data.get('verified'):
-            print(f"ipad-screen: ready https://{data.get('bind', 'pending')}:{data.get('port', 'pending')}/ (password in {PASSWORD})")
+            print(f"ipad-screen: ready https://{data.get('served_bind', 'pending')}:{data.get('port', 'pending')}/ (password in {PASSWORD})")
             return
         time.sleep(1)
     os.kill(child.pid, signal.SIGTERM)

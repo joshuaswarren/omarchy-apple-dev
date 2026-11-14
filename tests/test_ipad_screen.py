@@ -56,14 +56,6 @@ class ScreenSecurityTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             screen.password()
 
-    def test_only_tailscale_ipv4_is_accepted(self):
-        for value in ['0.0.0.0', '192.168.1.2', '127.0.0.1', str(__import__('ipaddress').IPv4Address(0x64010203)), '::1', 'invalid multiple addresses', '']:
-            with self.subTest(value=value), patch.object(screen, 'run', return_value=value):
-                with self.assertRaises((ValueError, RuntimeError)):
-                    screen.tailnet_ip()
-        with patch.object(screen, 'run', return_value=str(__import__('ipaddress').IPv4Address(0x64400102))):
-            self.assertEqual(screen.tailnet_ip(), str(__import__('ipaddress').IPv4Address(0x64400102)))
-
     def test_upgrade_never_uses_system_python(self):
         with patch.object(screen, 'version_ok', return_value=False), patch.object(screen.sys, 'prefix', screen.sys.base_prefix), patch.object(screen.subprocess, 'run') as run:
             with self.assertRaises(RuntimeError):
@@ -115,11 +107,11 @@ class ReviewRegressionTests(unittest.TestCase):
             def preflight():
                 self.assertIn('pid', __import__('json').loads((state / 'process.json').read_text()))
                 return 'fixture-secret'
-            with patch.object(screen, 'STATE', state), patch.object(screen, 'password', side_effect=preflight), patch.object(screen, 'tailnet_ip', return_value='192.0.2.1'), patch.object(screen, 'ensure_version'), patch.object(screen.socket, 'socket') as sock, patch.object(screen, 'run', return_value='true'), patch.object(screen.os, 'dup2'), patch.object(screen.signal, 'signal'), patch.object(screen.threading.Thread, 'start'), patch.dict(sys.modules, {'pymobiledevice3.__main__': module}), patch.dict(os.environ, {}, clear=True):
+            with patch.object(screen, 'STATE', state), patch.object(screen, 'password', side_effect=preflight), patch.object(screen, 'ensure_version'), patch.object(screen.socket, 'socket') as sock, patch.object(screen, 'run', return_value='true'), patch.object(screen.os, 'dup2'), patch.object(screen.signal, 'signal'), patch.object(screen.threading.Thread, 'start'), patch.object(screen, 'serve_remove'), patch.dict(sys.modules, {'pymobiledevice3.__main__': module}), patch.dict(os.environ, {}, clear=True):
                 screen.worker(types.SimpleNamespace(port=8080, udid='fixture-device'))
                 kwargs = app.call_args.kwargs
                 argv = kwargs['args']
-                self.assertEqual(argv[argv.index('--bind') + 1], '192.0.2.1')
+                self.assertEqual(argv[argv.index('--bind') + 1], '127.0.0.1')
                 self.assertIn('--https', argv)
                 self.assertNotIn('fixture-secret', repr(argv))
                 self.assertNotIn('fixture-secret', repr(dict(os.environ)))
@@ -165,7 +157,7 @@ class UpgradeRegressionTests(unittest.TestCase):
             self.assertEqual(run.call_args.args[0][-1], 'pymobiledevice3>=11.55,<12')
 
     def test_auth_guard_terminates_on_failed_check(self):
-        with patch.object(screen, 'ready', return_value=True), patch.object(screen, 'verify_auth', side_effect=RuntimeError('failed')), patch.object(screen.os, '_exit') as terminate:
+        with patch.object(screen, 'ready', return_value=True), patch.object(screen, 'verify_auth', side_effect=RuntimeError('failed')), patch.object(screen.os, '_exit') as terminate, patch.object(screen, 'serve_remove'):
             screen.auth_guard({}, 'fixture')
             terminate.assert_called_once_with(1)
 
@@ -186,3 +178,75 @@ class AuthRetryTests(unittest.TestCase):
             connection.return_value.request.side_effect = ConnectionRefusedError()
             self.assertIsNone(screen.auth_status({'bind': '192.0.2.1', 'port': 8080}))
             connection.return_value.close.assert_called_once()
+
+class PublicationTests(unittest.TestCase):
+    def test_serve_only_owns_unused_port(self):
+        data = {'port': 8080}
+        with patch.object(screen, 'serve_config', return_value={}), patch.object(screen, 'publish'), patch.object(screen, 'serve_cli', side_effect=['{"Self":{"DNSName":"viewer.example."}}', '']) as cli:
+            screen.serve_add(data)
+            self.assertEqual(cli.call_args.args, ('serve', '--bg', '--yes', '--https=8080', 'https+insecure://127.0.0.1:8080'))
+        expected = {'TCP': {'8080': {'HTTPS': True}, '443': {'HTTPS': True}},
+                    'Web': {'viewer.example:8080': {'Handlers': {'/': {'Proxy': 'https+insecure://127.0.0.1:8080'}}},
+                            'other.example:443': {'Handlers': {'/': {'Text': 'other'}}}}}
+        with patch.object(screen, 'serve_config', return_value=expected), patch.object(screen, 'serve_cli') as cli:
+            screen.serve_remove(data)
+            cli.assert_called_once_with('serve', '--https=8080', 'off')
+            self.assertNotIn('funnel', repr(cli.call_args))
+        with patch.object(screen, 'serve_config', return_value=expected), patch.object(screen, 'serve_cli') as cli:
+            with self.assertRaises(RuntimeError):
+                screen.serve_add({'port': 8080})
+            cli.assert_not_called()
+
+    def test_changed_mapping_is_preserved(self):
+        with patch.object(screen, 'serve_config', return_value={'TCP': {'8080': {'TCPForward': 'other'}}}), patch.object(screen, 'serve_cli') as cli:
+            with self.assertRaises(RuntimeError):
+                screen.serve_remove({'port': 8080, 'served_bind': 'viewer.example', 'serve_owned': True})
+            cli.assert_not_called()
+
+    def test_both_endpoints_checked_before_ready(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(screen, 'STATE', Path(directory)), patch.object(screen, 'ready', return_value=True), patch.object(screen, 'verify_auth') as verify, patch.object(screen, 'serve_add', side_effect=lambda d: d.update(served_bind='viewer.example')), patch.object(screen, 'publish') as publish:
+            data = {'bind': '127.0.0.1', 'port': 8080}
+            screen.auth_guard(data, 'fixture')
+            self.assertEqual(verify.call_count, 2)
+            self.assertTrue(verify.call_args.args[0]['trusted'])
+            self.assertTrue(publish.call_args.args[0]['verified'])
+
+    def test_permission_failure_explains_operator(self):
+        from unittest.mock import Mock
+        with patch.object(screen.subprocess, 'run', return_value=Mock(returncode=1)):
+            with self.assertRaisesRegex(RuntimeError, '--operator=<ACCOUNT>'):
+                screen.serve_cli('serve', '--https=8080', 'off')
+
+    def test_atomic_writer_and_stop(self):
+        import threading
+        with tempfile.TemporaryDirectory() as directory, patch.object(screen, 'STATE', Path(directory)):
+            old = {'pid': os.getpid(), 'starttime': screen.identity(os.getpid())}
+            screen.publish(old)
+            locked = threading.Event()
+            release = threading.Event()
+            def writer():
+                with open(screen.STATE / 'lock', 'a') as lock:
+                    screen.fcntl.flock(lock, screen.fcntl.LOCK_EX)
+                    locked.set()
+                    for i in range(100):
+                        screen.publish({**old, 'generation': i})
+                    release.wait(3)
+            thread = threading.Thread(target=writer)
+            thread.start()
+            locked.wait(3)
+            seen = []
+            def signal_worker(*_):
+                seen.append(True)
+                release.set()
+                thread.join(3)
+            with patch.object(screen.os, 'kill', side_effect=signal_worker):
+                screen.stop_worker()
+            self.assertTrue(seen)
+            thread.join(3)
+            self.assertFalse(thread.is_alive())
+
+    def test_missing_state_with_held_lock_never_reports_stopped(self):
+        with patch.object(screen, 'current', return_value=None), patch.object(screen, 'lock_held', return_value=True), patch.object(screen.time, 'sleep'), patch('builtins.print') as output:
+            with self.assertRaises(RuntimeError):
+                screen.stop_worker()
+            output.assert_not_called()

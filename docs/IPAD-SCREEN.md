@@ -1,93 +1,86 @@
-# iPad screen and control over Tailscale
+# iPad screen and control
 
-On the Linux host with the USB iPad, this tool runs pymobiledevice3's iOS 27+
-web viewer: video, taps/swipes, keyboard, hardware buttons, audio and clipboard.
-It only mirrors/controls; it never builds an app. Build elsewhere and use the
-existing install/launch tools for a finished IPA.
+This optional tool mirrors and controls a USB-attached iPad using
+pymobiledevice3 >=11.55,<12. It does not build apps.
 
-## Set up and start
+## Install and start
 
-Register this optional tool explicitly (the toolchain installer does not install it):
+Use a user-owned Python environment containing the supported upstream version.
+Selection: IPAD_SCREEN_PYTHON, ~/pymobile3-venv/bin/python, then the user pipx
+pymobiledevice3 environment.
 
 ```sh
 ./tools/ipad-screen.sh install
-ipad-screen start --udid YOUR_USB_UDID --upgrade
+ipad-screen start --udid YOUR_USB_UDID
 ipad-screen status
 ipad-screen stop
 ```
 
-`--upgrade` upgrades pymobiledevice3 to >=11.55,<12 only when needed, using the
-selected user venv, never system pip. Selection: `IPAD_SCREEN_PYTHON`, then
-`~/pymobile3-venv/bin/python`, then the user pipx pymobiledevice3 environment.
-An old version otherwise stops with upgrade instructions. Use `--port 8081`
-if 8080 is occupied. The application menu prompts for start/stop/status and UDID.
+Explicit start --upgrade permits a bounded upgrade in that user environment.
+Installation creates the command, menu entry, private directories and disabled
+user unit. It also prepares upstream state directories before sandboxing.
+It is not part of the toolchain installer.
 
-Developer Mode must already be enabled in Settings > Privacy & Security.
-The tool checks it, ensures the DDI with `mounter auto-mount`, and uses an
-in-process rootless userspace USB tunnel for the viewer. No tunneld, sudo,
-network service changes or reboot are needed. If USB trust, an unlock, or
-Developer Mode is required, stop and let the person holding the iPad tap it;
-then retry manually. DDI download/mount may take several minutes.
+Developer Mode and USB trust must already be enabled. If prompted, stop and
+let the person holding the iPad unlock it, tap Trust, or enable Developer Mode
+in Settings > Privacy & Security. No automatic reboot is attempted.
+DDI auto-mount uses the rootless userspace USB tunnel.
 
-## Open from another tailnet host
+## Publication and authentication
 
-Open the printed URL, `https://<TAILNET_IPV4>:8080/`, on the viewing host. Accept pymobiledevice3's ephemeral self-signed certificate
-warning for this known host. HTTPS is required for remote WebCodecs video;
-a browser/OS with HEVC decoding support is also required. A certificate can
-change on each start.
+Upstream binds only to 127.0.0.1, using HTTPS and a private password.
+A selected port (8080 by default, change with --port) must be unused in
+Tailscale Serve configuration. After loopback authentication is verified, the
+wrapper runs tailscale serve --bg --yes --https=PORT with an
+https+insecure://127.0.0.1:PORT backend. The self-signed backend certificate
+stays on loopback; the published endpoint uses Tailscale's trusted certificate.
+Ready requires 401 without credentials and 200 with credentials on both
+loopback and the published URL. Authentication transport retries are bounded.
+Use the published URL from status. HTTPS and browser HEVC decoding support
+are required for video.
 
-The browser requests HTTP Basic authentication: any username, and the password
-from `~/.config/omarchy-apple-dev/ipad-screen/password` **on the USB host**. Use an
-approved secret channel to enter it; agents must never paste it into chat,
-commands, URLs, logs, or browser automation arguments. The wrapper generates
-this file with mode 0600 if absent and refuses empty/insecure files. It passes
-the password to the upstream CLI in memory, never through argv or environment.
-It never prints the password. To rotate, stop, remove the file, and start again.
+A destination address bind alone does not enforce an ingress boundary:
+routed LAN traffic can reach addresses on another interface. Loopback plus
+Serve keeps the upstream listener off LAN and tailnet interfaces and makes
+Tailscale enforce the network access boundary.
 
-Anyone with the password and tailnet access to that port controls the iPad.
-The listener binds exclusively to the IPv4 returned by `tailscale ip -4`;
-there is no LAN/wildcard bind override. Tailnet access rules still apply.
-Stop the viewer when finished. Stop mirroring before using the iPad camera or
-microphone. Viewer accessibility changes can persist on the device; use its
-Reset controls when appropriate.
+The shared password is stored in
+~/.config/omarchy-apple-dev/ipad-screen/password with mode 0600, inside a
+0700 directory. Any username is accepted. Never paste the password into chat,
+URLs, commands, logs or automation arguments. It is passed upstream in memory,
+never argv or environment. Stop before rotating the file.
 
-Private lifecycle state and stage log live under
-`~/.local/state/omarchy-apple-dev/ipad-screen/` (0700). Upstream viewer output
-is suppressed to prevent credentials appearing in tracebacks. Startup requires HTTP 401 without authentication and HTTP 200 with the password. A ready status
-means authentication was verified; it does not assert that the browser decoded video.
+Restrict tag:ipad-viewer on the selected HTTPS port to group:ipad-operators
+in the tailnet grants/ACL policy; remove broader rules that permit that port.
+The password remains defense in depth. Stop the viewer when finished.
 
-## Optional user service (not enabled by installation)
+Serve requires existing account permission. If denied, an administrator must
+grant the account operator access using tailscale set --operator=<ACCOUNT>.
+The wrapper never grants permission or changes preferences itself.
+It never uses public publication. Existing mappings on the selected port
+are refused. Stop removes only its exact, unchanged mapping, preserving all
+other mappings. An externally changed mapping requires manual inspection.
+Do not concurrently edit the selected port while starting or stopping.
+If the process is forcibly killed or the daemon is unavailable during cleanup,
+inspect Serve status and remove only the viewer mapping before restarting.
 
-Installation copies `tools/ipad-screen@.service` to `~/.config/systemd/user/`.
-After one successful manual start/stop, optionally run:
+## Optional user service
+
+After installation, start once without enabling:
 
 ```sh
 systemctl --user daemon-reload
 systemctl --user start ipad-screen@YOUR_USB_UDID.service
-systemctl --user status ipad-screen@YOUR_USB_UDID.service
 systemctl --user stop ipad-screen@YOUR_USB_UDID.service
 ```
 
-Use either this service or manual `start`, not both. The unit runs in the
-foreground with the same lifetime lock and password requirements. It does not
-upgrade Python packages or enable itself. A service started manually exits if
-the device disconnects; retry after reconnecting. No lingering is configured.
-
-Upstream references: [screen mirroring](https://doronz88.github.io/pymobiledevice3/latest/guides/screen-mirroring/),
-[CLI recipes](https://doronz88.github.io/pymobiledevice3/latest/guides/cli-recipes/).
-
-## Alternative publication and access policy
-
-The maintainer must decide scope and publication design. Binding to loopback and publishing with `tailscale serve` could provide a browser trusted certificate and central access policy. This option is documented only; it is not implemented or tested and requires approval before any configuration changes.
-
-For the current shared password design, assign the USB host `tag:ipad-viewer` and allow only an approved `group:ipad-operators` to reach `tag:ipad-viewer:8080` (adjust the port if changed). Remove broader grants that also permit that port. The maintainer must approve and apply these policy changes; possession of the shared password alone must not grant network access.
-
-The service allows optional upstream state at `~/.pymobiledevice3` and
-`~/.local/share/pymobiledevice3`, plus `~/.cache/pymobiledevice3`.
-In upstream 11.55, pairing records and the `Xcode_iOS_DDI_Personalized` cache
-use the legacy directory when it exists; otherwise they use
-`$XDG_DATA_HOME/pymobiledevice3` (defaulting to the data path above).
-No separate XDG cache path is used by that DDI code; the cache allowlist
-is optional. For custom XDG roots, create the private upstream directory
-before starting and add its exact path with a user unit override.
-Restart attempts wait five seconds and are limited to three per minute.
+Use the service or manual start, not both. It uses the same lock and Serve
+lifecycle. It restarts on failure after five seconds, limited to three attempts
+per minute. Filesystem protection permits only private viewer and upstream
+state directories. Upstream 11.55 keeps pairing records and its personalized
+DDI cache under ~/.pymobiledevice3 when present; otherwise it uses
+$XDG_DATA_HOME/pymobiledevice3 (default ~/.local/share/pymobiledevice3).
+The optional ~/.cache/pymobiledevice3 path is also allowed. Custom XDG roots
+require creating the private directory and a matching ReadWritePaths override.
+Lifecycle state and logs live under ~/.local/state/omarchy-apple-dev/ipad-screen.
+State is atomically replaced; stop never confirms exit while the lock is held.
