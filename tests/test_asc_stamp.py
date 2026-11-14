@@ -23,7 +23,9 @@ class StampLayouts(unittest.TestCase):
                 sdk.mkdir(parents=True)
                 if layout == "xtool-broken":
                     continue
-                version, build = ("27.1", "XTOOL1") if layout == "xtool" else ("27.2", "FLAT1")
+                version, build = ("27.1", "XTOOL1") if layout.startswith("xtool") else ("27.2", "FLAT1")
+                if layout.endswith("-bad-version"):
+                    version = "bad"
                 (sdk / "SDKSettings.json").write_text(json.dumps({
                     "Version": version, "CanonicalName": "iphoneos" + version,
                 }))
@@ -89,6 +91,14 @@ class StampLayouts(unittest.TestCase):
         self.assertNotEqual(done.returncode, 0)
         self.assertIn("SDKSettings.json", done.stderr)
         self.assertEqual(raw, original)
+
+    def test_malformed_version_does_not_modify_app(self):
+        for layout in ("xtool-bad-version", "flat-bad-version"):
+            with self.subTest(layout=layout):
+                done, raw, original = self.run_stamp((layout,))
+                self.assertNotEqual(done.returncode, 0)
+                self.assertIn("ValueError", done.stderr)
+                self.assertEqual(raw, original)
 
 
 if __name__ == "__main__":
