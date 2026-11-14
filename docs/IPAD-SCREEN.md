@@ -81,3 +81,13 @@ Upstream references: [screen mirroring](https://doronz88.github.io/pymobiledevic
 The maintainer must decide scope and publication design. Binding to loopback and publishing with `tailscale serve` could provide a browser trusted certificate and central access policy. This option is documented only; it is not implemented or tested and requires approval before any configuration changes.
 
 For the current shared password design, assign the USB host `tag:ipad-viewer` and allow only an approved `group:ipad-operators` to reach `tag:ipad-viewer:8080` (adjust the port if changed). Remove broader grants that also permit that port. The maintainer must approve and apply these policy changes; possession of the shared password alone must not grant network access.
+
+The service allows optional upstream state at `~/.pymobiledevice3` and
+`~/.local/share/pymobiledevice3`, plus `~/.cache/pymobiledevice3`.
+In upstream 11.55, pairing records and the `Xcode_iOS_DDI_Personalized` cache
+use the legacy directory when it exists; otherwise they use
+`$XDG_DATA_HOME/pymobiledevice3` (defaulting to the data path above).
+No separate XDG cache path is used by that DDI code; the cache allowlist
+is optional. For custom XDG roots, create the private upstream directory
+before starting and add its exact path with a user unit override.
+Restart attempts wait five seconds and are limited to three per minute.
