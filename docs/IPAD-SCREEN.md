@@ -7,9 +7,7 @@ existing install/launch tools for a finished IPA.
 
 ## Set up and start
 
-The toolchain installer registers `ipad-screen` in `~/.local/bin` and adds
-**iPad screen (Tailscale)** to the application menu. On an existing install,
-register just this tool (no toolchain installer or builds):
+Register this optional tool explicitly (the toolchain installer does not install it):
 
 ```sh
 ./tools/ipad-screen.sh install
@@ -18,7 +16,7 @@ ipad-screen status
 ipad-screen stop
 ```
 
-`--upgrade` upgrades pymobiledevice3 to >=11.55 only when needed, using the
+`--upgrade` upgrades pymobiledevice3 to >=11.55,<12 only when needed, using the
 selected user venv, never system pip. Selection: `IPAD_SCREEN_PYTHON`, then
 `~/pymobile3-venv/bin/python`, then the user pipx pymobiledevice3 environment.
 An old version otherwise stops with upgrade instructions. Use `--port 8081`
@@ -31,18 +29,15 @@ network service changes or reboot are needed. If USB trust, an unlock, or
 Developer Mode is required, stop and let the person holding the iPad tap it;
 then retry manually. DDI download/mount may take several minutes.
 
-## Open from milcmini, r630s, or another tailnet host
+## Open from another tailnet host
 
-Start on Surface via SSH, then open the URL printed by `status` on the viewing
-host, for example `https://100.114.95.95:8080/` or
-`https://surface.zeedonk-ostrich.ts.net:8080/` (the name must resolve to Surface's
-Tailscale IPv4). Accept pymobiledevice3's ephemeral self-signed certificate
+Open the printed URL, `https://<TAILNET_IPV4>:8080/`, on the viewing host. Accept pymobiledevice3's ephemeral self-signed certificate
 warning for this known host. HTTPS is required for remote WebCodecs video;
 a browser/OS with HEVC decoding support is also required. A certificate can
 change on each start.
 
 The browser requests HTTP Basic authentication: any username, and the password
-from `~/.config/omarchy-apple-dev/ipad-screen/password` **on Surface**. Use an
+from `~/.config/omarchy-apple-dev/ipad-screen/password` **on the USB host**. Use an
 approved secret channel to enter it; agents must never paste it into chat,
 commands, URLs, logs, or browser automation arguments. The wrapper generates
 this file with mode 0600 if absent and refuses empty/insecure files. It passes
@@ -58,8 +53,8 @@ Reset controls when appropriate.
 
 Private lifecycle state and stage log live under
 `~/.local/state/omarchy-apple-dev/ipad-screen/` (0700). Upstream viewer output
-is suppressed to prevent credentials appearing in tracebacks. A ready status
-means the TCP listener is up; it does not assert that the browser decoded video.
+is suppressed to prevent credentials appearing in tracebacks. Startup requires HTTP 401 without authentication and HTTP 200 with the password. A ready status
+means authentication was verified; it does not assert that the browser decoded video.
 
 ## Optional user service (not enabled by installation)
 
@@ -80,3 +75,9 @@ the device disconnects; retry after reconnecting. No lingering is configured.
 
 Upstream references: [screen mirroring](https://doronz88.github.io/pymobiledevice3/latest/guides/screen-mirroring/),
 [CLI recipes](https://doronz88.github.io/pymobiledevice3/latest/guides/cli-recipes/).
+
+## Alternative publication and access policy
+
+The maintainer must decide scope and publication design. Binding to loopback and publishing with `tailscale serve` could provide a browser trusted certificate and central access policy. This option is documented only; it is not implemented or tested and requires approval before any configuration changes.
+
+For the current shared password design, assign the USB host `tag:ipad-viewer` and allow only an approved `group:ipad-operators` to reach `tag:ipad-viewer:8080` (adjust the port if changed). Remove broader grants that also permit that port. The maintainer must approve and apply these policy changes; possession of the shared password alone must not grant network access.

@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Tailnet-only, password-protected iPad viewer lifecycle (Linux)."""
 import argparse
+import base64
+import http.client
+import ssl
+import threading
 import fcntl
 import importlib.metadata
 import ipaddress
@@ -53,7 +57,7 @@ def run(args, timeout=60):
         try:
             out, _ = child.communicate(timeout=timeout)
             if child.returncode:
-                raise RuntimeError('device check failed; Dalton may need to unlock/tap Trust on the iPad; retry manually')
+                raise RuntimeError(f'{Path(args[0]).name} check failed (exit {child.returncode}); check the selected tool and connection')
             return out
         finally:
             if child.poll() is None:
@@ -64,7 +68,7 @@ def run(args, timeout=60):
 def tailnet_ip():
     value = run(['tailscale', 'ip', '-4']).strip()
     address = ipaddress.IPv4Address(value)
-    if address not in ipaddress.IPv4Network('100.64.0.0/10'):
+    if address not in ipaddress.IPv4Network((0x64400000, 10)):
         raise RuntimeError('tailscale did not return a single Tailscale IPv4 address')
     return str(address)
 
@@ -72,7 +76,7 @@ def tailnet_ip():
 def version_ok():
     from packaging.version import Version
     try:
-        return Version(importlib.metadata.version('pymobiledevice3')) >= Version('11.55.0')
+        return Version(importlib.metadata.version('pymobiledevice3')) >= Version('11.55.0') and Version(importlib.metadata.version('pymobiledevice3')) < Version('12')
     except importlib.metadata.PackageNotFoundError:
         return False
 
@@ -81,12 +85,12 @@ def ensure_version(upgrade):
     if version_ok():
         return
     if not upgrade:
-        raise RuntimeError('pymobiledevice3 >= 11.55 required; run start --upgrade to upgrade this venv')
+        raise RuntimeError('pymobiledevice3 >=11.55,<12 required; run start --upgrade to upgrade this venv')
     if sys.prefix == sys.base_prefix or not Path(sys.prefix).resolve().is_relative_to(Path.home().resolve()):
         raise RuntimeError('refusing upgrade outside a user-owned virtual environment')
-    subprocess.run([sys.executable, '-m', 'pip', 'install', '--upgrade', 'pymobiledevice3>=11.55'], check=True)
+    subprocess.run([sys.executable, '-m', 'pip', 'install', '--upgrade', 'pymobiledevice3>=11.55,<12'], check=True)
     if not version_ok():
-        raise RuntimeError('pymobiledevice3 upgrade did not provide 11.55 or newer')
+        raise RuntimeError('pymobiledevice3 upgrade did not provide a supported version')
 
 
 def identity(pid):
@@ -111,8 +115,42 @@ def ready(data):
     try:
         with socket.create_connection((data['bind'], data['port']), timeout=0.5):
             return True
-    except OSError:
+    except (OSError, KeyError):
         return False
+
+
+def auth_status(data, secret=None):
+    connection = http.client.HTTPSConnection(data['bind'], data['port'], timeout=2,
+                                            context=ssl._create_unverified_context())
+    headers = {}
+    if secret is not None:
+        token = base64.b64encode(('viewer:' + secret).encode()).decode()
+        headers['Authorization'] = 'Basic ' + token
+    try:
+        connection.request('GET', '/', headers=headers)
+        return connection.getresponse().status
+    finally:
+        connection.close()
+
+
+def verify_auth(data, secret):
+    if auth_status(data) != 401 or auth_status(data, secret) != 200:
+        raise RuntimeError('viewer authentication check failed')
+
+
+def auth_guard(data, secret):
+    try:
+        for _ in range(400):
+            if ready(data):
+                verify_auth(data, secret)
+                data['verified'] = True
+                (STATE / 'process.json').write_text(json.dumps(data))
+                return
+            time.sleep(1)
+    except Exception:
+        pass
+    # Immediate nonzero exit also releases the lifetime lock; never leave an open viewer.
+    os._exit(1)
 
 
 def worker(args):
@@ -123,11 +161,14 @@ def worker(args):
         except BlockingIOError:
             raise RuntimeError('viewer is already starting/running')
         signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+        data = dict(pid=os.getpid(), starttime=identity(os.getpid()))
+        (STATE / 'process.json').write_text(json.dumps(data))
         secret = password()
         bind = tailnet_ip()
         ensure_version(False)
         # Fail before contacting the device if the port is already occupied.
         with socket.socket() as probe:
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             probe.bind((bind, args.port))
         data = dict(pid=os.getpid(), starttime=identity(os.getpid()), bind=bind, port=args.port)
         (STATE / 'process.json').write_text(json.dumps(data))
@@ -140,13 +181,14 @@ def worker(args):
             pmd = [sys.executable, '-m', 'pymobiledevice3']
             print('Checking USB trust and Developer Mode', flush=True)
             if run(pmd + ['amfi', 'developer-mode-status', '--udid', args.udid]).strip() != 'true':
-                raise RuntimeError('Dalton must enable Developer Mode on the iPad; no automatic reboot attempted')
+                raise RuntimeError('the person holding the iPad must enable Developer Mode on the iPad; no automatic reboot attempted')
             print('Ensuring DDI (rootless userspace tunnel)', flush=True)
             run(pmd + ['mounter', 'auto-mount', '--udid', args.udid, '--userspace'], timeout=300)
             print('Starting HTTPS viewer', flush=True)
             # Supply Click's default in memory: the password never enters argv or the environment.
             # Upstream output is discarded so even an upstream traceback cannot log credentials.
             from pymobiledevice3.__main__ import app
+            threading.Thread(target=auth_guard, args=(data, secret), daemon=True).start()
             with open(os.devnull, 'w') as sink:
                 os.dup2(sink.fileno(), 1)
                 os.dup2(sink.fileno(), 2)
@@ -208,7 +250,7 @@ def main():
         return
     if args.command == 'status':
         data = current()
-        print(f"ipad-screen: {'ready' if ready(data) else 'starting'} https://{data['bind']}:{data['port']}/" if data else 'ipad-screen: stopped')
+        print(f"ipad-screen: {'ready' if data.get('verified') and ready(data) else 'starting'} https://{data.get('bind', 'pending')}:{data.get('port', 'pending')}/" if data else 'ipad-screen: stopped')
         return
     if not args.udid:
         parser.error('--udid or IPAD_SCREEN_UDID is required; no implicit first-device selection')
@@ -227,14 +269,14 @@ def main():
                                  stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
     for _ in range(400):
         if child.poll() is not None:
-            raise RuntimeError('startup failed; check private viewer.log. If locked/untrusted, Dalton must unlock/tap Trust on the iPad, then retry')
+            raise RuntimeError('startup failed; check private viewer.log. If locked/untrusted, the person holding the iPad must unlock/tap Trust on the iPad, then retry')
         data = current()
-        if data and data['pid'] == child.pid and ready(data):
-            print(f"ipad-screen: ready https://{data['bind']}:{data['port']}/ (password in {PASSWORD})")
+        if data and data['pid'] == child.pid and data.get('verified'):
+            print(f"ipad-screen: ready https://{data.get('bind', 'pending')}:{data.get('port', 'pending')}/ (password in {PASSWORD})")
             return
         time.sleep(1)
     os.kill(child.pid, signal.SIGTERM)
-    raise RuntimeError('startup timed out; stopped viewer. Dalton may need to unlock/tap Trust on the iPad')
+    raise RuntimeError('startup timed out; stopped viewer. the person holding the iPad may need to unlock/tap Trust on the iPad')
 
 
 if __name__ == '__main__':
@@ -242,5 +284,5 @@ if __name__ == '__main__':
         main()
     except (RuntimeError, OSError, ValueError, subprocess.SubprocessError) as error:
         # Never print command output, environment, or exception repr (may contain credentials).
-        print(f'ipad-screen: {error}' if isinstance(error, RuntimeError) else 'ipad-screen: operation failed; check USB trust, Tailscale and the selected venv', file=sys.stderr)
+        print(f'ipad-screen: {error}' if isinstance(error, RuntimeError) else 'ipad-screen: operation failed; check filesystem permissions and the selected command', file=sys.stderr)
         sys.exit(1)

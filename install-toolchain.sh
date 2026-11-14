@@ -627,7 +627,7 @@ fi
 
 echo "== 4. pymobiledevice3 in a venv =="
 venv_ensure
-"$VENV/bin/python" "$REPO_DIR/tools/ipad-screen.py" install
+# Optional viewer registration: run tools/ipad-screen.sh install explicitly.
 
 if [ "$MODE" = no-xcode ]; then
   echo "== 5. Build files, no Xcode download (iPhone or Apple's public iOS update)"

@@ -1,6 +1,9 @@
 [Unit]
 Description=Tailscale iPad screen for USB device %i
 
+After=tailscaled.service
+Wants=tailscaled.service
+
 [Service]
 Type=simple
 ExecStart=%h/.local/bin/ipad-screen run --udid %i
@@ -8,6 +11,10 @@ KillMode=control-group
 TimeoutStopSec=15
 UMask=0077
 NoNewPrivileges=true
+Restart=on-failure
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=%h/.config/omarchy-apple-dev/ipad-screen %h/.local/state/omarchy-apple-dev/ipad-screen
 
 [Install]
 WantedBy=default.target
