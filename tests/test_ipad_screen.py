@@ -168,3 +168,21 @@ class UpgradeRegressionTests(unittest.TestCase):
         with patch.object(screen, 'ready', return_value=True), patch.object(screen, 'verify_auth', side_effect=RuntimeError('failed')), patch.object(screen.os, '_exit') as terminate:
             screen.auth_guard({}, 'fixture')
             terminate.assert_called_once_with(1)
+
+class AuthRetryTests(unittest.TestCase):
+    def test_transient_network_failure_retries(self):
+        with patch.object(screen, 'auth_status', side_effect=[None, None, 401, 200]), patch.object(screen.time, 'sleep') as sleep:
+            screen.verify_auth({}, 'fixture')
+            sleep.assert_called_once_with(0.25)
+
+    def test_network_failure_is_bounded(self):
+        with patch.object(screen, 'auth_status', return_value=None) as status, patch.object(screen.time, 'sleep'):
+            with self.assertRaises(RuntimeError):
+                screen.verify_auth({}, 'fixture')
+            self.assertEqual(status.call_count, 6)
+
+    def test_http_network_errors_are_failure(self):
+        with patch.object(screen.http.client, 'HTTPSConnection') as connection:
+            connection.return_value.request.side_effect = ConnectionRefusedError()
+            self.assertIsNone(screen.auth_status({'bind': '192.0.2.1', 'port': 8080}))
+            connection.return_value.close.assert_called_once()

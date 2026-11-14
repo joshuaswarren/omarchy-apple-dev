@@ -4,6 +4,9 @@ Description=Tailscale iPad screen for USB device %i
 After=tailscaled.service
 Wants=tailscaled.service
 
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
 [Service]
 Type=simple
 ExecStart=%h/.local/bin/ipad-screen run --udid %i
@@ -12,9 +15,11 @@ TimeoutStopSec=15
 UMask=0077
 NoNewPrivileges=true
 Restart=on-failure
+RestartSec=5s
 PrivateTmp=true
 ProtectSystem=strict
 ReadWritePaths=%h/.config/omarchy-apple-dev/ipad-screen %h/.local/state/omarchy-apple-dev/ipad-screen
+ReadWritePaths=-%h/.pymobiledevice3 -%h/.local/share/pymobiledevice3 -%h/.cache/pymobiledevice3
 
 [Install]
 WantedBy=default.target

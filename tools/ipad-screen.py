@@ -129,13 +129,26 @@ def auth_status(data, secret=None):
     try:
         connection.request('GET', '/', headers=headers)
         return connection.getresponse().status
+    except (OSError, http.client.HTTPException):
+        return None
     finally:
         connection.close()
 
 
 def verify_auth(data, secret):
-    if auth_status(data) != 401 or auth_status(data, secret) != 200:
-        raise RuntimeError('viewer authentication check failed')
+    for attempt in range(3):
+        anonymous = auth_status(data)
+        authenticated = auth_status(data, secret)
+        if anonymous == 401 and authenticated == 200:
+            return
+        # An actual HTTP mismatch is unsafe; retry only transport startup failures.
+        if anonymous is not None and anonymous != 401:
+            break
+        if authenticated is not None and authenticated != 200:
+            break
+        if attempt < 2:
+            time.sleep(0.25)
+    raise RuntimeError('viewer authentication check failed')
 
 
 def auth_guard(data, secret):
@@ -147,7 +160,7 @@ def auth_guard(data, secret):
                 (STATE / 'process.json').write_text(json.dumps(data))
                 return
             time.sleep(1)
-    except Exception:
+    except (RuntimeError, OSError, http.client.HTTPException):
         pass
     # Immediate nonzero exit also releases the lifetime lock; never leave an open viewer.
     os._exit(1)
