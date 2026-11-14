@@ -826,7 +826,17 @@ class Generator:
             lo, hi = req["minimumVersion"], bump_minor(req["minimumVersion"])
             return f"{sw_sy(lo)}..<{sw_sy(hi)}"
         if kind == "exactVersion":
-            return f"exact: {sw_sy(req['exactVersion'])}"
+            # Xcode writes the pinned version under `version`; `exactVersion` kept for hand-written projects
+            version = req.get("version") or req.get("exactVersion")
+            if version:
+                return f"exact: {sw_sy(version)}"
+            rev = revs.get(ident)
+            if rev:
+                self.warn(f"exact version requirement without a version for {url}; "
+                          "pinned to Package.resolved revision")
+                return f"revision: {sw_sy(rev)}"
+            self.warn(f"exact version requirement without a version for {url}; skipped")
+            return None
         if kind == "versionRange":
             return f"{sw_sy(req['minimumVersion'])}..<{sw_sy(req['maximumVersion'])}"
         if kind == "branch":
@@ -2392,6 +2402,9 @@ SELF_TEST_PROJ = r"""// !$*UTF8*$!
 			packageProductDependencies = (
 				FFFF00000000000000000001 /* Logging */,
 				FFFF00000000000000000002 /* Branchy */,
+				FFFF00000000000000000004 /* Exacty */,
+				FFFF00000000000000000005 /* Legacy */,
+				FFFF00000000000000000006 /* Noversion */,
 				FFFF00000000000000000003 /* DemoLib */,
 			);
 			productName = DemoApp;
@@ -2426,6 +2439,9 @@ SELF_TEST_PROJ = r"""// !$*UTF8*$!
 			packageReferences = (
 				EEEE0000000000000000000A /* XCRemoteSwiftPackageReference "swift-log" */,
 				EEEE0000000000000000000B /* XCRemoteSwiftPackageReference "Branchy" */,
+				EEEE00000000000000000014 /* XCRemoteSwiftPackageReference "Exacty" */,
+				EEEE00000000000000000015 /* XCRemoteSwiftPackageReference "Legacy" */,
+				EEEE00000000000000000016 /* XCRemoteSwiftPackageReference "Noversion" */,
 				EEEE00000000000000000013 /* XCLocalSwiftPackageReference "DemoPkg" */,
 			);
 			targets = (
@@ -2550,6 +2566,29 @@ SELF_TEST_PROJ = r"""// !$*UTF8*$!
 				kind = branch;
 			};
 		};
+		EEEE00000000000000000014 /* XCRemoteSwiftPackageReference "Exacty" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://example.com/exacty.git";
+			requirement = {
+				kind = exactVersion;
+				version = 1.0.3;
+			};
+		};
+		EEEE00000000000000000015 /* XCRemoteSwiftPackageReference "Legacy" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://example.com/legacy.git";
+			requirement = {
+				exactVersion = 2.0.0;
+				kind = exactVersion;
+			};
+		};
+		EEEE00000000000000000016 /* XCRemoteSwiftPackageReference "Noversion" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://example.com/noversion.git";
+			requirement = {
+				kind = exactVersion;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCLocalSwiftPackageReference section */
@@ -2569,6 +2608,21 @@ SELF_TEST_PROJ = r"""// !$*UTF8*$!
 			isa = XCSwiftPackageProductDependency;
 			package = EEEE0000000000000000000B /* XCRemoteSwiftPackageReference "Branchy" */;
 			productName = Branchy;
+		};
+		FFFF00000000000000000004 /* Exacty */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = EEEE00000000000000000014 /* XCRemoteSwiftPackageReference "Exacty" */;
+			productName = Exacty;
+		};
+		FFFF00000000000000000005 /* Legacy */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = EEEE00000000000000000015 /* XCRemoteSwiftPackageReference "Legacy" */;
+			productName = Legacy;
+		};
+		FFFF00000000000000000006 /* Noversion */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = EEEE00000000000000000016 /* XCRemoteSwiftPackageReference "Noversion" */;
+			productName = Noversion;
 		};
 		FFFF00000000000000000003 /* DemoLib */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -2698,6 +2752,15 @@ def _self_test(root):
         ("tools-version", "// swift-tools-version: 6.2" in pkg),
         ("platform", '.iOS("16.4")' in pkg),
         ("upToNextMinor range", '"1.5.3"..<"1.6.0"' in pkg),
+        ("exact version as Xcode writes it",
+         '.package(url: "https://example.com/exacty.git", exact: "1.0.3")' in pkg),
+        ("exact version under the legacy exactVersion key",
+         '.package(url: "https://example.com/legacy.git", exact: "2.0.0")' in pkg),
+        ("exact version missing: skipped, no empty pin",
+         "noversion.git" not in pkg and 'exact: ""' not in pkg),
+        ("exact version missing: warned",
+         "exact version requirement without a version for https://example.com/noversion.git"
+         in warnings_text),
         ("branch requirement preserved",
          '.package(url: "https://example.com/branchy.git", branch: "main")' in pkg),
         ("branch requirement has no warning", "cannot build branch" not in warnings_text),
