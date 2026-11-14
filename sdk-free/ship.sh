@@ -26,6 +26,10 @@ BUNDLE=$OUT/Runner.app
 [ -n "${ASC_KEY_ID:-}" ] || echo "warning: no ASC_KEY_ID: signing with the TEST identity (Apple rejects it)" >&2
 
 echo "== 1. App Store Info.plist keys and Mach-O sdk =="
+# asc.py stamp prefers the xtool layout, then the flat iPhoneOS.sdk under
+# $DARWIN_SDK; setup.sh installs the latter under $SDKFREE_HOME.
+SDKFREE_HOME=${SDKFREE_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/omarchy-apple-dev/sdk-free}
+export DARWIN_SDK=${DARWIN_SDK:-$SDKFREE_HOME}
 export XCODE_VERSION=${XCODE_VERSION:-27.0} XCODE_BUILD=${XCODE_BUILD:-27A266a}
 "$PY" "$ASC" stamp "$BUNDLE" "${BUILD_NUMBER:-$(date -u +%Y%m%d%H%M)}"
 

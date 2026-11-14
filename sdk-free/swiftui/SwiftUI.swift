@@ -157,7 +157,7 @@ public struct Binding<Value> {
 // Image are @frozen in the OSS interface and the device dump fields match,
 // so each passes in a single register. A resilient-empty Color here would
 // make clients pass an empty value where the device init reads a register.
-@frozen public struct Color {
+@frozen public struct Color: ShapeStyle {
   public var provider: AnyObject
   public static var red: Color { fatalError() }
   public static var green: Color { fatalError() }
