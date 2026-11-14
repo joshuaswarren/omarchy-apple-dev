@@ -124,10 +124,12 @@ class ReviewRegressionTests(unittest.TestCase):
 class InstallEntryTests(unittest.TestCase):
     def test_install_is_explicit_and_creates_disabled_entries(self):
         import sys
-        with tempfile.TemporaryDirectory() as directory, patch.object(Path, 'home', return_value=Path(directory)), patch.object(sys, 'argv', ['ipad-screen', 'install']):
+        with tempfile.TemporaryDirectory() as directory, patch.object(Path, 'home', return_value=Path(directory)), patch.object(sys, 'argv', ['ipad-screen', 'install']), patch.object(screen, 'CONFIG', Path(directory) / 'config'), patch.object(screen, 'PASSWORD', Path(directory) / 'config/password'), patch.object(screen, 'STATE', Path(directory) / 'state'):
             screen.main()
             home = Path(directory)
             self.assertTrue((home / '.local/bin/ipad-screen').is_symlink())
+            self.assertTrue((home / '.local/share/pymobiledevice3').is_dir())
+            self.assertFalse((home / '.pymobiledevice3').exists())
             self.assertTrue((home / '.local/share/applications/omarchy-ipad-screen.desktop').exists())
             self.assertTrue((home / '.config/systemd/user/ipad-screen@.service').exists())
             self.assertFalse((home / '.config/systemd/user/default.target.wants').exists())

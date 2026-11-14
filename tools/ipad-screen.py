@@ -338,7 +338,7 @@ def main():
     if args.command == 'install':
         password()
         private_dir(STATE)
-        for upstream in (Path.home() / '.pymobiledevice3', Path.home() / '.local/share/pymobiledevice3', Path.home() / '.cache/pymobiledevice3'):
+        for upstream in (Path.home() / '.local/share/pymobiledevice3', Path.home() / '.cache/pymobiledevice3'):
             upstream.mkdir(parents=True, exist_ok=True, mode=0o700)
         binary = Path.home() / '.local/bin/ipad-screen'
         binary.parent.mkdir(parents=True, exist_ok=True)
