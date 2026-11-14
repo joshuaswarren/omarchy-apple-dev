@@ -269,7 +269,10 @@ def auth_guard(data, secret):
                 return
             time.sleep(1)
     except (RuntimeError, OSError, ValueError, KeyError, http.client.HTTPException) as error:
-        (STATE / 'startup-error').write_text(str(error) if isinstance(error, RuntimeError) else 'authentication check failed: ' + type(error).__name__)
+        try:
+            (STATE / 'startup-error').write_text(str(error) if isinstance(error, RuntimeError) else 'authentication check failed: ' + type(error).__name__)
+        except OSError:
+            pass  # Diagnostics must never prevent fail-closed cleanup.
     # Immediate nonzero exit also releases the lifetime lock; never leave an open viewer.
     try:
         serve_remove(data)

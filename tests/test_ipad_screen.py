@@ -159,7 +159,7 @@ class UpgradeRegressionTests(unittest.TestCase):
             self.assertEqual(run.call_args.args[0][-1], 'pymobiledevice3>=11.55,<12')
 
     def test_auth_guard_terminates_on_failed_check(self):
-        with patch.object(screen, 'ready', return_value=True), patch.object(screen, 'verify_auth', side_effect=RuntimeError('failed')), patch.object(screen.os, '_exit') as terminate, patch.object(screen, 'serve_remove'):
+        with tempfile.TemporaryDirectory() as directory, patch.object(screen, 'STATE', Path(directory)), patch.object(screen, 'ready', return_value=True), patch.object(screen, 'verify_auth', side_effect=RuntimeError('failed')), patch.object(screen.os, '_exit') as terminate, patch.object(screen, 'serve_remove'):
             screen.auth_guard({}, 'fixture')
             terminate.assert_called_once_with(1)
 
@@ -281,3 +281,9 @@ class ReviewFollowupTests(unittest.TestCase):
                 screen.serve_add(data)
         self.assertTrue(data['serve_pending'])
         self.assertNotIn('serve_owned', data)
+
+class DiagnosticFailureTests(unittest.TestCase):
+    def test_missing_diagnostic_directory_still_exits(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(screen, 'STATE', Path(directory) / 'absent'), patch.object(screen, 'ready', return_value=True), patch.object(screen, 'verify_auth', side_effect=RuntimeError('failed')), patch.object(screen, 'serve_remove'), patch.object(screen.os, '_exit') as terminate:
+            screen.auth_guard({}, 'fixture')
+            terminate.assert_called_once_with(1)
