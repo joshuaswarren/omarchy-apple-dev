@@ -1,21 +1,21 @@
-# Flutter iOS build and App Store signing, on Linux, proven in this container
+# Flutter iOS build and App Store signing: historical Linux container report
 
-Date: 2026-11-03. Container: `omarchy-apple` (Ubuntu 24.04, 4 vCPU / 8 GiB), repo at
-`/root/omarchy-apple-dev`, no-xcode mode, no Apple account, no phone, no macOS.
+Date: 2026-11-03. Contributor-reported Ubuntu 24.04 container (4 vCPU / 8 GiB),
+no-xcode mode, no Apple account, no phone, no macOS. Not independently reproduced.
 
 ## What was run
 
-    flutter create --platforms=ios --org dev.innotel --project-name hello /root/flutter-apps/hello
-    sdk-free/flutter-build.sh --debug /root/flutter-apps/hello
-    sdk-free/ship.sh /root/flutter-apps/hello        # TEST identity, no ASC key
+    flutter create --platforms=ios --org dev.innotel --project-name hello <app>
+    <repo>/sdk-free/flutter-build.sh --debug <app>
+    <repo>/sdk-free/ship.sh <app>        # TEST identity, no ASC key
 
-Result: the debug bundle builds (`Runner.app/Runner` is a thin arm64 Mach-O), and
-`ship.sh` stamps, signs and validates it: **44/44 checks passed**, including the
+Reported result: the debug bundle builds (`Runner.app/Runner` is a thin arm64 Mach-O),
+and `ship.sh` stamps, signs and validates it: **44/44 checks passed**, including the
 storyboard (`UIMainStoryboardFile 'Main' is compiled in the bundle`), the 1024 icon in
 `Assets.car`, the iPad orientations, and every sealed hash.
 
-`ship.sh` reads `build/ios-sdkfree/release` unconditionally, so the debug run is pointed
-at by a `release` symlink; nothing else in the path is special-cased.
+`ship.sh` reads `build/ios-sdkfree/release` unconditionally. This historical debug run
+used a manually created `release` symlink; that workaround is not part of the code fix.
 
 ## Defect found and fixed
 
@@ -34,9 +34,6 @@ Fix: `gen-info-plist.py` honours an `IOS_DIR` override (default unchanged) and
 ## Not proven: release builds here
 
 Release needs `flutter/setup.sh`, which builds the iOS `gen_snapshot` from the Dart SDK
-source (~7 GB on disk, ~12 min). This host had ~11 GB free, and the `gclient sync` had
-already taken the filesystem to 3.6 GB free (97% used) on a host that also runs `aidev`;
-it was stopped and the partial checkout (5.9 GB) removed. Debug is the furthest this
-container's disk allows. Give the VM more space and re-run
-`flutter/setup.sh && sdk-free/flutter-build.sh <app> && sdk-free/ship.sh <app>` for the
-release path; no code change should be needed.
+source (~7 GB on disk, ~12 min). The reported container had ~11 GB free; `gclient sync`
+left 3.6 GB free (97% used), so it was stopped and the partial checkout (5.9 GB) removed.
+Release build/signing remains unverified; the debug result does not establish it.

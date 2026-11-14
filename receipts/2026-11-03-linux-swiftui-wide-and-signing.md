@@ -1,7 +1,7 @@
-# SwiftUI wide surface and the App Store signing pipeline, proven on Linux
+# SwiftUI wide surface and App Store signing: historical Linux container report
 
-Date: 2026-11-03. Container: `omarchy-apple` (Ubuntu 24.04, 4 vCPU / 8 GiB), repo at
-`/root/omarchy-apple-dev`, no-xcode mode, no Apple account, no phone.
+Date: 2026-11-03. Contributor-reported Ubuntu 24.04 container (4 vCPU / 8 GiB),
+no-xcode mode, no Apple account, no phone. Not independently reproduced.
 
 ## What was checked
 
@@ -33,10 +33,12 @@ the repo actool, so the icon checks exercised the real path.
 1. `foregroundStyle(Color.primary)` did not compile: `ShapeStyle` was declared but
    `Color` did not conform, so the documented wide surface was unusable. Fix:
    `@frozen public struct Color: ShapeStyle` in `sdk-free/swiftui/SwiftUI.swift`.
-2. `asc.py stamp` crashed in no-xcode mode: it reads
+2. `asc.py stamp` crashed in no-xcode mode: it read only
    `$DARWIN_SDK/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk`
-   (the xtool layout), and no-xcode has `$SDKFREE_HOME/iPhoneOS.sdk` only. Fix: that
-   path is now a symlink to the sysroot and `DARWIN_SDK=$SDKFREE_HOME` is exported.
-   This also blocked `sdk-free/ship.sh`, whose step 1 is the same stamp.
+   (the xtool layout), while setup installs `$SDKFREE_HOME/iPhoneOS.sdk`.
+   The historical run used a manual symlink and exported `DARWIN_SDK=$SDKFREE_HOME`;
+   setup.sh does not create that symlink. The shared stamp fallback now handles
+   the flat layout without it, including the `sdk-free/ship.sh` step 1 caller.
 
-Reproduce: `/root/build/smoke.sh` (exits non-zero on any FAIL).
+The reported `40/40` result came from an unversioned container-local smoke harness,
+not a reproducible repository test command or a fresh result for this fix.

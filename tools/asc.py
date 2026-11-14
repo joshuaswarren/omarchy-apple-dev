@@ -106,6 +106,8 @@ def rel(kind, ident):
 def stamp(app_dir, build_number):
     """Add the build-environment keys App Store processing reads from Info.plist."""
     sdk = SDK / "Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk"
+    if not sdk.is_dir():
+        sdk = SDK / "iPhoneOS.sdk"
     settings = json.loads((sdk / "SDKSettings.json").read_text())
     version_plist = sdk / "System/Library/CoreServices/SystemVersion.plist"
     sdk_build = plistlib.loads(version_plist.read_bytes())["ProductBuildVersion"]
