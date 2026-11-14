@@ -148,8 +148,10 @@ def serve_preflight():
 
 def serve_cli(*args):
     result = subprocess.run(['tailscale', *args], capture_output=True, text=True, timeout=20)
-    if result.returncode:
+    if result.returncode and any(term in result.stderr.lower() for term in ('access denied', 'permission denied', 'must be root')):
         raise ServePermissionError('Tailscale Serve unavailable or permission denied; an administrator must grant this account operator access with tailscale set --operator=<ACCOUNT>; no preferences were changed')
+    if result.returncode:
+        raise RuntimeError(f'Tailscale command failed (exit {result.returncode}); check daemon availability and CLI compatibility')
     return result.stdout
 
 
@@ -162,7 +164,8 @@ def port_config(config, port):
     found = {}
     for section in ('TCP', 'Web', 'AllowFunnel'):
         values = {k: v for k, v in config.get(section, {}).items()
-                  if str(k) == str(port) or str(k).endswith(':' + str(port))}
+                  if (str(k) == str(port) or str(k).endswith(':' + str(port)))
+                  and (section != 'AllowFunnel' or v)}
         if values:
             found[section] = values
     for key, child in config.get('Foreground', {}).items():
@@ -179,14 +182,17 @@ def serve_add(data):
     host = info['Self']['DNSName'].rstrip('.')
     data['served_bind'] = host
     # Publish intent first, so cleanup can recover if configuration succeeds before interruption.
-    data['serve_owned'] = True
+    data['serve_pending'] = True
     publish(data)
     serve_cli('serve', '--bg', '--yes', '--https=' + str(data['port']),
               'https+insecure://127.0.0.1:' + str(data['port']))
+    data['serve_owned'] = True
+    data.pop('serve_pending', None)
+    publish(data)
 
 
 def serve_remove(data):
-    if not data.get('serve_owned'):
+    if not (data.get('serve_owned') or data.get('serve_pending')):
         return
     selected = port_config(serve_config(), data['port'])
     expected = {'TCP': {str(data['port']): {'HTTPS': True}},
@@ -263,7 +269,7 @@ def auth_guard(data, secret):
                 return
             time.sleep(1)
     except (RuntimeError, OSError, ValueError, KeyError, http.client.HTTPException) as error:
-        (STATE / 'startup-error').write_text(str(error) if isinstance(error, RuntimeError) else 'authentication transport failed')
+        (STATE / 'startup-error').write_text(str(error) if isinstance(error, RuntimeError) else 'authentication check failed: ' + type(error).__name__)
     # Immediate nonzero exit also releases the lifetime lock; never leave an open viewer.
     try:
         serve_remove(data)

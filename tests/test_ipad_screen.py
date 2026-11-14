@@ -215,7 +215,7 @@ class PublicationTests(unittest.TestCase):
 
     def test_permission_failure_explains_operator(self):
         from unittest.mock import Mock
-        with patch.object(screen.subprocess, 'run', return_value=Mock(returncode=1)):
+        with patch.object(screen.subprocess, 'run', return_value=Mock(returncode=1, stderr='Access denied')):
             with self.assertRaisesRegex(RuntimeError, '--operator=<ACCOUNT>'):
                 screen.serve_cli('serve', '--https=8080', 'off')
 
@@ -259,3 +259,23 @@ class ServePermissionTests(unittest.TestCase):
             with self.assertRaises(screen.ServePermissionError):
                 screen.serve_preflight()
             cli.assert_called_once_with('debug', 'prefs')
+
+class ReviewFollowupTests(unittest.TestCase):
+    def test_non_permission_cli_error_is_accurate(self):
+        from unittest.mock import Mock
+        with patch.object(screen.subprocess, 'run', return_value=Mock(returncode=1, stderr='daemon unavailable')):
+            with self.assertRaisesRegex(RuntimeError, 'daemon availability') as error:
+                screen.serve_cli('serve', 'status', '--json')
+            self.assertNotIsInstance(error.exception, screen.ServePermissionError)
+
+    def test_false_public_flag_is_not_an_external_mapping(self):
+        self.assertEqual(screen.port_config({'AllowFunnel': {'viewer.example:8080': False}}, 8080), {})
+        self.assertTrue(screen.port_config({'AllowFunnel': {'viewer.example:8080': True}}, 8080))
+
+    def test_failed_add_records_pending_not_confirmed_ownership(self):
+        data = {'port': 8080}
+        with patch.object(screen, 'serve_config', return_value={}), patch.object(screen, 'publish'), patch.object(screen, 'serve_cli', side_effect=['{"Self":{"DNSName":"viewer.example"}}', RuntimeError('failed')]):
+            with self.assertRaises(RuntimeError):
+                screen.serve_add(data)
+        self.assertTrue(data['serve_pending'])
+        self.assertNotIn('serve_owned', data)
