@@ -106,12 +106,16 @@ def rel(kind, ident):
 def stamp(app_dir, build_number):
     """Add the build-environment keys App Store processing reads from Info.plist."""
     sdk = SDK / "Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk"
-    if not sdk.is_dir():
+    # Anything at the xtool path, even a file or dangling link, selects it: a broken xtool SDK must fail, not fall back.
+    if not os.path.lexists(sdk):
         sdk = SDK / "iPhoneOS.sdk"
     settings = json.loads((sdk / "SDKSettings.json").read_text())
     version_plist = sdk / "System/Library/CoreServices/SystemVersion.plist"
     sdk_build = plistlib.loads(version_plist.read_bytes())["ProductBuildVersion"]
-    sdk_raw = sum(int(p) << s for p, s in zip((settings["Version"].split(".") + ["0", "0"])[:3], (16, 8, 0)))
+    sdk_major, sdk_minor, sdk_patch = (int(p) for p in (settings["Version"].split(".") + ["0", "0"])[:3])
+    if not (0 <= sdk_major <= 0xFFFF and 0 <= sdk_minor <= 0xFF and 0 <= sdk_patch <= 0xFF):
+        die(f"SDK Version {settings['Version']} does not fit the Mach-O xxxx.yy.zz field")
+    sdk_raw = sdk_major << 16 | sdk_minor << 8 | sdk_patch
     if XCODE_VERSION_PLISTS:
         xcode = plistlib.loads(XCODE_VERSION_PLISTS[-1].read_bytes())
         xcode_version, xcode_build = xcode["CFBundleShortVersionString"], xcode["ProductBuildVersion"]
