@@ -1,5 +1,5 @@
 [Unit]
-Description=Tailscale iPad screen for USB device %i
+Description=Loopback iPad screen with Tailscale Serve for USB device %i
 
 After=tailscaled.service
 Wants=tailscaled.service
@@ -16,6 +16,7 @@ UMask=0077
 NoNewPrivileges=true
 Restart=on-failure
 RestartSec=5s
+RestartPreventExitStatus=77
 PrivateTmp=true
 ProtectSystem=strict
 ReadWritePaths=%h/.config/omarchy-apple-dev/ipad-screen %h/.local/state/omarchy-apple-dev/ipad-screen

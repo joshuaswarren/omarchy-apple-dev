@@ -6,6 +6,7 @@ import http.client
 import ssl
 import threading
 import fcntl
+import getpass
 import importlib.metadata
 import tempfile
 import json
@@ -23,6 +24,8 @@ CONFIG = Path.home() / '.config/omarchy-apple-dev/ipad-screen'
 STATE = Path.home() / '.local/state/omarchy-apple-dev/ipad-screen'
 PASSWORD = CONFIG / 'password'
 SELF = Path(__file__).resolve()
+SERVE_LOCK = threading.RLock()
+STOPPING = threading.Event()
 
 
 def private_dir(path):
@@ -133,10 +136,20 @@ def stop_worker():
     raise RuntimeError('viewer is still starting/running; stop could not confirm exit')
 
 
+class ServePermissionError(RuntimeError):
+    pass
+
+
+def serve_preflight():
+    prefs = json.loads(serve_cli('debug', 'prefs'))
+    if os.getuid() != 0 and prefs.get('OperatorUser') != getpass.getuser():
+        raise ServePermissionError('Tailscale Serve requires operator permission; an administrator must grant it with tailscale set --operator=<ACCOUNT>; no preferences were changed')
+
+
 def serve_cli(*args):
     result = subprocess.run(['tailscale', *args], capture_output=True, text=True, timeout=20)
     if result.returncode:
-        raise RuntimeError('Tailscale Serve unavailable or permission denied; an administrator must grant this account operator access with tailscale set --operator=<ACCOUNT>; no preferences were changed')
+        raise ServePermissionError('Tailscale Serve unavailable or permission denied; an administrator must grant this account operator access with tailscale set --operator=<ACCOUNT>; no preferences were changed')
     return result.stdout
 
 
@@ -240,13 +253,16 @@ def auth_guard(data, secret):
         for _ in range(400):
             if ready(data):
                 verify_auth(data, secret)
-                serve_add(data)
-                verify_auth(dict(bind=data['served_bind'], port=data['port'], trusted=True), secret)
-                data['verified'] = True
-                publish(data)
+                with SERVE_LOCK:
+                    if STOPPING.is_set():
+                        return
+                    serve_add(data)
+                    verify_auth(dict(bind=data['served_bind'], port=data['port'], trusted=True), secret)
+                    data['verified'] = True
+                    publish(data)
                 return
             time.sleep(1)
-    except (RuntimeError, OSError, http.client.HTTPException) as error:
+    except (RuntimeError, OSError, ValueError, KeyError, http.client.HTTPException) as error:
         (STATE / 'startup-error').write_text(str(error) if isinstance(error, RuntimeError) else 'authentication transport failed')
     # Immediate nonzero exit also releases the lifetime lock; never leave an open viewer.
     try:
@@ -265,6 +281,7 @@ def worker(args):
         signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
         data = dict(pid=os.getpid(), starttime=identity(os.getpid()))
         publish(data)
+        serve_preflight()
         secret = password()
         bind = '127.0.0.1'
         ensure_version(False)
@@ -298,8 +315,10 @@ def worker(args):
                           '--bind', bind, '--http-port', str(args.port), '--https'],
                     default_map={'developer': {'core-device': {'display': {'serve-web': {'password': secret}}}}})
         finally:
-            serve_remove(data)
-            (STATE / 'process.json').unlink(missing_ok=True)
+            STOPPING.set()
+            with SERVE_LOCK:
+                serve_remove(data)
+                (STATE / 'process.json').unlink(missing_ok=True)
 
 
 def main():
@@ -361,6 +380,7 @@ def main():
         return
     if current():
         raise RuntimeError('viewer is already starting/running; use status or stop')
+    serve_preflight()
     password()
     with open(STATE / 'viewer.log', 'w') as log:
         child = subprocess.Popen([sys.executable, str(SELF), 'run', '--udid', args.udid, '--port', str(args.port)],
@@ -383,4 +403,4 @@ if __name__ == '__main__':
     except (RuntimeError, OSError, ValueError, subprocess.SubprocessError) as error:
         # Never print command output, environment, or exception repr (may contain credentials).
         print(f'ipad-screen: {error}' if isinstance(error, RuntimeError) else 'ipad-screen: operation failed; check filesystem permissions and the selected command', file=sys.stderr)
-        sys.exit(1)
+        sys.exit(77 if isinstance(error, ServePermissionError) else 1)

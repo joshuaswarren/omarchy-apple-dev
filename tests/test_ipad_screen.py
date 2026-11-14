@@ -107,7 +107,7 @@ class ReviewRegressionTests(unittest.TestCase):
             def preflight():
                 self.assertIn('pid', __import__('json').loads((state / 'process.json').read_text()))
                 return 'fixture-secret'
-            with patch.object(screen, 'STATE', state), patch.object(screen, 'password', side_effect=preflight), patch.object(screen, 'ensure_version'), patch.object(screen.socket, 'socket') as sock, patch.object(screen, 'run', return_value='true'), patch.object(screen.os, 'dup2'), patch.object(screen.signal, 'signal'), patch.object(screen.threading.Thread, 'start'), patch.object(screen, 'serve_remove'), patch.dict(sys.modules, {'pymobiledevice3.__main__': module}), patch.dict(os.environ, {}, clear=True):
+            with patch.object(screen, 'STATE', state), patch.object(screen, 'password', side_effect=preflight), patch.object(screen, 'ensure_version'), patch.object(screen, 'serve_preflight'), patch.object(screen.socket, 'socket') as sock, patch.object(screen, 'run', return_value='true'), patch.object(screen.os, 'dup2'), patch.object(screen.signal, 'signal'), patch.object(screen.threading.Thread, 'start'), patch.object(screen, 'serve_remove'), patch.dict(sys.modules, {'pymobiledevice3.__main__': module}), patch.dict(os.environ, {}, clear=True):
                 screen.worker(types.SimpleNamespace(port=8080, udid='fixture-device'))
                 kwargs = app.call_args.kwargs
                 argv = kwargs['args']
@@ -180,6 +180,8 @@ class AuthRetryTests(unittest.TestCase):
             connection.return_value.close.assert_called_once()
 
 class PublicationTests(unittest.TestCase):
+    def setUp(self):
+        screen.STOPPING.clear()
     def test_serve_only_owns_unused_port(self):
         data = {'port': 8080}
         with patch.object(screen, 'serve_config', return_value={}), patch.object(screen, 'publish'), patch.object(screen, 'serve_cli', side_effect=['{"Self":{"DNSName":"viewer.example."}}', '']) as cli:
@@ -250,3 +252,10 @@ class PublicationTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 screen.stop_worker()
             output.assert_not_called()
+
+class ServePermissionTests(unittest.TestCase):
+    def test_no_operator_fails_without_changes(self):
+        with patch.object(screen, 'serve_cli', return_value='{}') as cli, patch.object(screen.os, 'getuid', return_value=1000):
+            with self.assertRaises(screen.ServePermissionError):
+                screen.serve_preflight()
+            cli.assert_called_once_with('debug', 'prefs')
