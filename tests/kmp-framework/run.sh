@@ -23,12 +23,15 @@
 #                             matching archive is cached and reused
 #  10  platform klibs:        Gradle's klib/platform/ LIBRARY lines are not passed
 #                             (the compiler adds its own), other libraries are
+#  13  jar dependencies:      LIBRARY lines naming a .jar (a JVM artifact some
+#                             native artifacts declare) are not passed, klibs are
 # Mutants (each must fail its row):
 #   M1  drop `|| return 1` after kmp_distribution -> row 1 goes on to the link
 #   M2  drop the cp check of the Compose resources -> row 4 succeeds
 #   M3  always write ios-arm64 -> row 7
 #   M4  drop the BINOPT case in kmp_link -> row 8
 #   M5  drop the klib/platform/ skip in kmp_link -> row 10
+#   M6  drop the .jar skip in kmp_link -> row 13
 # usage: run.sh [path-to-build-framework.sh]   default: ../../kmp/build-framework.sh
 set -uo pipefail
 here=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
@@ -223,6 +226,13 @@ if out=$(KMP_TEST_ARCHIVE="$tmp/archives/a64.tgz" KMP_TEST_SUMS="$tmp/sums.good"
   [ -e "$tmp/x.tgz" ] || ! grep -q KMP_ARM64_SUMS <<<"$out"; then
   bad "row 12: an unpinned version was fetched, or the message does not name KMP_ARM64_SUMS: $out"
 else ok "row 12: an unpinned version fails closed and names KMP_ARM64_SUMS"; fi
+
+# 13 a jar in Gradle's dump (org.jetbrains:annotations, declared by apollo-annotations 3.x) is not passed
+reset_logs
+if kmp_link "$(block "$tmp/b13" "" 'LIBRARY\t/gradle/org.jetbrains/annotations/23.0.0/annotations-23.0.0.jar\nLIBRARY\t/deps/apollo-api.klib')" ios_arm64 "" true >/dev/null 2>&1 &&
+  grep -qx /deps/apollo-api.klib "$KMP_TEST_LOG/library" && ! grep -q '\.jar$' "$KMP_TEST_LOG/library"; then
+  ok "row 13: jar dependencies left out of the link, klibs passed"
+else bad "row 13: a jar was passed to the compiler, or a klib dropped"; fi
 
 [ "$fail" = 0 ] && echo "kmp-framework: all rows passed" || echo "kmp-framework: FAILED"
 exit "$fail"

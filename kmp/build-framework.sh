@@ -293,6 +293,9 @@ kmp_link() {
   while IFS=$'\t' read -r kind value; do
     # The compiler adds its own platform klibs; Gradle's copies (listed on aarch64) would clash with them
     [ "$kind" = LIBRARY ] && [[ "$value" == */klib/platform/* ]] && continue
+    # A JVM jar some Kotlin/Native artifacts declare (apollo-annotations 3.x: org.jetbrains:annotations):
+    # the Gradle plugin keeps it off the compiler's command line, and the compiler fails the link on it
+    [ "$kind" = LIBRARY ] && [[ "$value" == *.jar ]] && continue
     case "$kind" in
     INCLUDE | LIBRARY | EXPORT)
       [ -n "${given[$value]:-}" ] || args+=(-library "$value")
