@@ -111,6 +111,7 @@ def stamp(app_dir, build_number):
     settings = json.loads((sdk / "SDKSettings.json").read_text())
     version_plist = sdk / "System/Library/CoreServices/SystemVersion.plist"
     sdk_build = plistlib.loads(version_plist.read_bytes())["ProductBuildVersion"]
+    sdk_raw = sum(int(p) << s for p, s in zip((settings["Version"].split(".") + ["0", "0"])[:3], (16, 8, 0)))
     if XCODE_VERSION_PLISTS:
         xcode = plistlib.loads(XCODE_VERSION_PLISTS[-1].read_bytes())
         xcode_version, xcode_build = xcode["CFBundleShortVersionString"], xcode["ProductBuildVersion"]
@@ -158,7 +159,6 @@ def stamp(app_dir, build_number):
             plistlib.dump(bundle_info, f, fmt=plistlib.FMT_BINARY)
     # The Linux link writes the deployment target into LC_BUILD_VERSION's sdk field; App Store
     # processing reads the SDK version from there (ITMS-90725). Record the SDK actually used.
-    sdk_raw = sum(int(p) << s for p, s in zip((settings["Version"].split(".") + ["0", "0"])[:3], (16, 8, 0)))
     patched = 0
     for path in Path(app_dir).rglob("*"):
         if path.is_file() and not path.is_symlink() and set_macho_sdk(path, sdk_raw):
