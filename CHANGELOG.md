@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Icon Composer background fills of kind automatic-gradient
+
+- `actool` (AssetKit) ignored an `icon.json` background of kind `automatic-gradient`
+  (`{"automatic-gradient": "srgb:..."}`) and wrote the
+  `system-light` and `system-dark` gradients in its place. iOS 26 draws the icon from
+  the `IconImageStack`, so the icon showed a white-to-gray background in light mode and
+  a gray one in dark mode. The flat icon images had the wrong background too.
+- The AssetKit pin moves to joshuaswarren/AssetKit#6 (on `omarchy/mac-icon`, so it
+  also brings the merged macOS `.icon` layout, AssetKit #2). It compiles the fill as
+  Apple's actool 27.2 does: a named gradient with one stop, the source color, for
+  each appearance that has the fill (light and tinted `Gradient-1`, dark `Gradient-2` for an icon with a
+  dark specialization; a bare fill keeps `system-dark` in dark). The flat images use
+  the source color as a plain background; Apple's automatic shading of it is not
+  reproduced.
+
 ## v0.4.3
 
 ### asc.py publish: the post-upload release steps as an opt-in command
