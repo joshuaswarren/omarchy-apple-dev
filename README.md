@@ -337,6 +337,12 @@ omarchy-apple-dev is free. If it helps you,
 [sponsor the project](https://github.com/sponsors/joshuaswarren) or send
 Lightning to `joshuaswarren@strike.me`.
 
+## Remote iPad screen and control
+
+For a USB iPad on another tailnet host, use [ipad-screen](docs/IPAD-SCREEN.md)
+for a password-protected HTTPS viewer, start/stop/status, and an optional user
+service. It mirrors and controls without building on the device host.
+
 ## License
 
 MIT

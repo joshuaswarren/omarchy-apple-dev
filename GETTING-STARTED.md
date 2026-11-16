@@ -187,3 +187,9 @@ needs none of this.
 - After a Swift toolchain swap (mise, asdf), run `install-toolchain.sh --repair`.
 - Search FINDINGS.md for the exact error text. Most of the errors met so far
   are listed there with their cause and fix.
+
+## Remote iPad screen and control
+
+For a USB iPad on another tailnet host, use [ipad-screen](docs/IPAD-SCREEN.md)
+for a password-protected HTTPS viewer, start/stop/status, and an optional user
+service. It mirrors and controls without building on the device host.
