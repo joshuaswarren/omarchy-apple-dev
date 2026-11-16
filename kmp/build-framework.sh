@@ -10,8 +10,10 @@
 #   - the iOS runtime of Kotlin/Native, which only its macOS distribution
 #     carries: taken from Maven Central (about 300 MB, once) and added to a
 #     copy of the Linux one (hard links, in ~/.cache/omarchy-apple-dev/kmp);
-#   - LLVM and libffi for the host: the Linux ones, public, downloaded by the
-#     compiler into its own data directory;
+#   - LLVM and libffi for the host: the Linux ones, public, downloaded from the
+#     JetBrains server the compiler uses, into its own data directory (by this
+#     script: the compiler runs as on a Mac, and a JDK before 21 then fails its
+#     first connection on jdk.net.MacOSXSocketOptions);
 #   - the linker of Xcode: the ld64.lld of the SDK's toolset, behind a wrapper
 #     named ld (lld picks its mode from the name it is called by); and its
 #     libtool, for a static framework: llvm-libtool-darwin, which the toolset
@@ -174,6 +176,67 @@ kmp_arm64_deps() {
   done
 }
 
+# SHA-256 of the x86_64 host archives the link needs (Kotlin/Native 2.3 and
+# 2.4), pinned here and keyed by archive name. Computed from the archives the
+# JetBrains server served on 2026-11-14. The LLVM values match the .sha256 the
+# server keeps next to each archive; the libffi one is the digest of the served
+# archive, not the one in the server's .sha256, which does not match it
+# (6c97f0a4..., 2026-11-14). KMP_X64_SUMS, a SHA256SUMS file you trust,
+# replaces this table (for the archives of another Kotlin/Native version).
+KMP_X64_PINNED="bf4ea893243ed724ce8c31b9a4a43c51cbd92fdcc66f4f18e5670d1ae5d832c7  llvm-19-x86_64-linux-essentials-109.tar.gz
+0b1f290214dd7ec20e2506210967e0ebd735cdefc3a3b4485bbccb439fa78e5b  llvm-21-x86_64-linux-essentials-116.tar.gz
+9d817bbca098a2fa0f1d5a8b9e57674c30d100bb4c6aeceff18d8acc5b9f382c  libffi-3.2.1-2-linux-x86-64.tar.gz"
+
+# LLVM and libffi for an x86_64 host, from the JetBrains server the compiler
+# itself would use (dependenciesUrl and the <name>.default paths of
+# konan.properties), checked against KMP_X64_PINNED (or KMP_X64_SUMS), then
+# extracted into the compiler's data directory and marked there as extracted,
+# so the compiler finds them and fetches nothing. Fetched here rather than by
+# the compiler: it runs with os.name=Mac OS X, and a JDK before 21 then looks
+# for jdk.net.MacOSXSocketOptions on its first connection and fails
+# (ClassNotFoundException); JDK 21 and later pick the platform at build time.
+# An archive with no pinned digest is not downloaded.
+kmp_x64_deps() {
+  local deps="$1/dependencies" props="$2" base dep sub url sums sum got
+  shift 2
+  if [ -n "${KMP_X64_SUMS:-}" ]; then
+    sums="$(cat "$KMP_X64_SUMS")" || return 1
+  else
+    sums="$KMP_X64_PINNED"
+  fi
+  base="$(sed -n 's/^dependenciesUrl *= *//p' "$props")"
+  for dep in "$@"; do
+    grep -qx "$dep" "$deps/.extracted" 2>/dev/null && [ -d "$deps/$dep" ] && continue
+    sum="$(awk -v f="$dep.tar.gz" '{ sub(/^\*/, "", $2) } $2 == f { print $1 }' <<<"$sums")"
+    if [ -z "$sum" ]; then
+      err "no pinned checksum for $dep.tar.gz: set KMP_X64_SUMS to a SHA256SUMS file you trust"
+      return 1
+    fi
+    sub="$(awk -F' *= *' -v k="$dep.default" '$1 == k { sub(/^remote:public:/, "", $2); print $2 }' "$props")"
+    url="$base/${sub:+$sub/}$dep.tar.gz"
+    log "$dep, from $url (once)"
+    if ! curl -fL --progress-bar -o "$deps/$dep.tar.gz" "$url" >&2; then
+      rm -f "$deps/$dep.tar.gz"
+      err "download failed: $url"
+      return 1
+    fi
+    got="$(sha256sum "$deps/$dep.tar.gz" | cut -d' ' -f1)"
+    if [ "$got" != "$sum" ]; then
+      rm -f "$deps/$dep.tar.gz"
+      err "$dep.tar.gz does not match its pinned checksum: expected $sum, got $got ($url)"
+      return 1
+    fi
+    rm -rf "${deps:?}/$dep" || return 1
+    if ! tar -xzf "$deps/$dep.tar.gz" -C "$deps" || [ ! -d "$deps/$dep" ]; then
+      rm -rf "${deps:?}/$dep" "$deps/$dep.tar.gz"
+      err "$dep.tar.gz could not be extracted"
+      return 1
+    fi
+    rm -f "$deps/$dep.tar.gz"
+    echo "$dep" >>"$deps/.extracted" || return 1
+  done
+}
+
 # A copy of the Linux distribution with the iOS runtime of the macOS one.
 # Built in a scratch directory and moved into the cache only once the
 # download, the copy and the extraction succeeded and both iOS runtimes are
@@ -282,6 +345,8 @@ kmp_link() {
   ffi="$(sed -n "s/^libffiDir\.$host *= *//p" "$props")"
   if [ "$KMP_HOST" = aarch64 ]; then
     kmp_arm64_deps "$data" "$llvm" "$ffi" || return 1
+  else
+    kmp_x64_deps "$data" "$props" "$llvm" "$ffi" || return 1
   fi
   local overrides="llvmHome.macos_x64=$llvm;libffiDir.macos_x64=$ffi;dependencies.macos_x64=$llvm $ffi"
   overrides+=";dependencies.macos_x64-$target=;targetToolchain.macos_x64-$target=omarchy-kmp-toolchain"
