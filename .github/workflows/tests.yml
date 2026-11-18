@@ -11,6 +11,7 @@ permissions:
 jobs:
   run-sh:
     runs-on: ubuntu-latest
+    timeout-minutes: 30  # normal runs finish in ~4min; bounds the rare hang that otherwise burns hours (4 runs >2h in the last 14d)
     steps:
       - uses: actions/checkout@v4
       - run: bash tests/run.sh
