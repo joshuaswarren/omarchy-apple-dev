@@ -2,8 +2,21 @@
 # Exercises the esp_install path in m6-partition-write.sh: a changed esp.tar must be
 # refused before anything is unpacked; a matching tar unpacks. Runs on any host with
 # bash, tar and shasum/sha256sum; curl is stubbed, no network, no disk touched.
+#
+# Trust boundary: esp.sha, like SHA256SUMS, is announced by the same image server, so
+# the check catches a damaged or mismatched download and does NOT protect against
+# someone who controls that server or the path to it; the user runs the server on
+# their own network with the token and allow-list.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
+if command -v shasum > /dev/null 2>&1; then
+    sha() { shasum -a 256 | awk '{print $1}'; }
+elif command -v sha256sum > /dev/null 2>&1; then
+    sha() { sha256sum | awk '{print $1}'; }
+else
+    echo "ABORT: neither shasum nor sha256sum (nothing changed)" >&2
+    exit 1
+fi
 td="$(mktemp -d)"
 trap 'rm -rf "$td"' EXIT
 
@@ -12,7 +25,7 @@ printf 'stage1-payload\n' > "$td/esp-tree/aurora/stage1.bin"
 tar -cf "$td/good.tar" -C "$td/esp-tree" .
 cp "$td/good.tar" "$td/tampered.tar"
 printf 'TAMPERED-BYTES\n' >> "$td/tampered.tar"
-printf '%s\n' "$(shasum -a 256 "$td/good.tar" | awk '{print $1}')" > "$td/esp.sha"
+printf '%s\n' "$(sha < "$td/good.tar")" > "$td/esp.sha"
 
 SERVER="http://stub.invalid/0000"
 TAMPER=0

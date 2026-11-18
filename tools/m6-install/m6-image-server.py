@@ -7,6 +7,11 @@
   boot.bin             local file (the composed boot object)
   SHA256SUMS           expected hashes (from the image's IMAGE file)
 
+Trust boundary: SHA256SUMS and esp.sha are announced by this same server, so the
+client checks catch a damaged or mismatched download; they do not protect against
+someone who controls this server or the path to it. Run it on your own network and
+keep the token and allow-list.
+
 Every path needs the one-time token as first component: /<token>/root.img. Only --allow addresses or networks connect.
 Stdlib only (Python 3.9+).
 """

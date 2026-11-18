@@ -9,6 +9,10 @@
 # Layout (from the image's installer metadata): ESP FAT32 500 MiB (volume id 0x4f4d5801), Boot 2 GiB (ext4, label OMARCHY_BOOT),
 # Root btrfs (label OMARCHY_ROOT; the shipped UUID is 4f4d5801-524f-4f54-8000-000000000001, but serve the overlay r7 root image,
 # which has its own random UUID: a fixed one collides with any install stick). Root is ROOT_BYTES; the image is 13.6 GB and grows after first boot.
+#
+# Trust boundary: esp.sha, like SHA256SUMS, is announced by the same image server, so the hash checks catch a damaged
+# or mismatched download and do NOT protect against someone who controls that server or the path to it; the user runs
+# the server on their own network with the token and allow-list.
 set -euo pipefail
 if command -v shasum > /dev/null 2>&1; then
     sha() { shasum -a 256 | awk '{print $1}'; }
