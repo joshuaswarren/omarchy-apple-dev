@@ -10,9 +10,6 @@
 # Root btrfs (label OMARCHY_ROOT; the shipped UUID is 4f4d5801-524f-4f54-8000-000000000001, but serve the overlay r7 root image,
 # which has its own random UUID: a fixed one collides with any install stick). Root is ROOT_BYTES; the image is 13.6 GB and grows after first boot.
 set -euo pipefail
-for t in diskutil plutil curl dd newfs_msdos tar awk head; do
-    command -v "$t" > /dev/null 2>&1 || { echo "ABORT: $t is missing in this environment (nothing changed)" >&2; exit 1; }
-done
 if command -v shasum > /dev/null 2>&1; then
     sha() { shasum -a 256 | awk '{print $1}'; }
 elif command -v sha256sum > /dev/null 2>&1; then
@@ -21,6 +18,25 @@ else
     echo "ABORT: neither shasum nor sha256sum (nothing changed)" >&2
     exit 1
 fi
+
+# Fetch the ESP tar with the same expected-hash discipline as the images: the server
+# announces esp.sha, the fetched bytes must match before anything is unpacked.
+esp_install() {
+    local mnt="$1" want got tmp="/tmp/m6-esp.tar"
+    want="$(curl -fsS "$SERVER/esp.sha")" || return 1
+    curl -fsS "$SERVER/esp.tar" -o "$tmp" || return 1
+    got="$(sha < "$tmp")"
+    [ "$got" = "$want" ] || { echo "ABORT: esp.tar sha256 $got, want $want" >&2; return 1; }
+    tar -x -f "$tmp" -C "$mnt"
+    rm -f "$tmp"
+}
+
+# Source-safe exit for test-esp-verify.sh; only takes effect when the file is sourced.
+case "${M6_TEST_ONLY:-}" in 1) return 0 2>/dev/null || exit 0 ;; esac
+
+for t in diskutil plutil curl dd newfs_msdos tar awk head; do
+    command -v "$t" > /dev/null 2>&1 || { echo "ABORT: $t is missing in this environment (nothing changed)" >&2; exit 1; }
+done
 
 mode="${1:-}"
 [ "$mode" = "--dry-run" ] || [ "$mode" = "--go" ] || { echo "usage: $0 --dry-run | --go" >&2; exit 64; }
@@ -76,7 +92,7 @@ DRY RUN. Would run:
   newfs_msdos -F 32 -v OMARCHY-EFI -I 0x4f4d5801 /dev/r<ESP>
   curl $SERVER/boot.img | dd of=/dev/r<Boot> bs=4m   (sha256 must be $boot_sha)
   curl $SERVER/root.img | dd of=/dev/r<Root> bs=4m   (sha256 must be $root_sha)
-  curl $SERVER/esp.tar | tar -x -C <ESP mount>; remove aurora/stage1-j700.bin and m1n1/boot-j700.bin
+  curl $SERVER/esp.tar | tar -x -C <ESP mount>   (esp.tar hash-checked against $SERVER/esp.sha before unpacking); remove aurora/stage1-j700.bin and m1n1/boot-j700.bin
 Nothing changed.
 EOF
     exit 0
@@ -122,7 +138,7 @@ stream root.img "$root" "$root_sha"
 
 diskutil mount "$esp"
 mnt="$(diskutil info -plist "$esp" | plutil -extract MountPoint raw -o - -)"
-curl -fsS "$SERVER/esp.tar" | tar -x -C "$mnt"
+esp_install "$mnt"
 rm -f "$mnt/aurora/stage1-j700.bin" "$mnt/m1n1/boot-j700.bin"
 # Without this file the image's initramfs encrypts the root in place on first boot (omarchy-mac-encrypt: absent or encrypt=1).
 mkdir -p "$mnt/omarchy"

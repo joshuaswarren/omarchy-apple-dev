@@ -3,6 +3,7 @@
 
   boot.img, root.img   streamed out of the image zip on the build host (nothing is extracted to disk)
   esp.tar              tar of the zip's esp/ tree, built on the fly
+  esp.sha              sha256 of that same tar, announced so the client can verify before unpacking
   boot.bin             local file (the composed boot object)
   SHA256SUMS           expected hashes (from the image's IMAGE file)
 
@@ -33,6 +34,22 @@ if what == "esp.tar":
                 ti.mode = 0o644
                 with z.open(i) as f:
                     t.addfile(ti, f)
+elif what == "esp.sha":
+    import hashlib
+    h = hashlib.sha256()
+    class Sink:
+        def write(self, b):
+            h.update(b)
+            return len(b)
+    with tarfile.open(fileobj=Sink(), mode="w|") as t:
+        for i in z.infolist():
+            if i.filename.startswith("esp/") and not i.is_dir():
+                ti = tarfile.TarInfo(i.filename[4:])
+                ti.size = i.file_size
+                ti.mode = 0o644
+                with z.open(i) as f:
+                    t.addfile(ti, f)
+    print(h.hexdigest())
 elif what == "size":
     print(z.getinfo(sys.argv[3]).file_size)
 else:
@@ -71,7 +88,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
             return
-        if name in ("m6-partition-write.sh", "m6-enrol-boot.sh", "m6-recovery-all.sh"):
+        if name in ("m6-partition-write.sh", "m6-macos-install.sh"):
             data = (Path(__file__).resolve().parent / name).read_bytes()
             self.send_response(200)
             self.send_header("Content-Length", str(len(data)))
@@ -80,6 +97,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         if name == "sizes":
             data = "".join(f"{k} {v}\n" for k, v in cfg.sizes.items()).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
+        if name == "esp.sha":
+            remote = f"python3 -c {shlex.quote(REMOTE_STREAM)} {shlex.quote(cfg.zip)} esp.sha"
+            out = subprocess.run(argv(cfg.host, remote), check=True, capture_output=True)
+            data = out.stdout.strip() + b"\n"
             self.send_response(200)
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
