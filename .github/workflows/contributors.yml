@@ -19,11 +19,14 @@ permissions:
 
 concurrency:
   group: contributors-upkeep
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   upkeep:
     runs-on: ubuntu-latest
+    # Weekly upkeep is a short API call plus a diff; 15 min bounds a stuck
+    # gh call without ever reaching it in practice.
+    timeout-minutes: 15
     env:
       # One exclusion policy shared by regeneration and the --check pass so
       # the check can never validate under a different policy than wrote.

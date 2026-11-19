@@ -3,7 +3,16 @@ name: tests
 on:
   push:
     branches: [main]
+    paths-ignore: &doc-paths
+      - 'docs/**'
+      - 'receipts/**'
+      - '**/*.md'
   pull_request:
+    paths-ignore: *doc-paths
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -11,7 +20,7 @@ permissions:
 jobs:
   run-sh:
     runs-on: ubuntu-latest
-    timeout-minutes: 30  # normal runs finish in ~4min; bounds the rare hang that otherwise burns hours (4 runs >2h in the last 14d)
+    timeout-minutes: 15  # last 30 runs finished in 2-5min; 15 is ~3x margin and still bounds the rare hang
     steps:
       - uses: actions/checkout@v4
       - run: bash tests/run.sh
