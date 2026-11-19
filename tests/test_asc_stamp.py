@@ -134,5 +134,67 @@ class StampLayouts(unittest.TestCase):
                 self.assertEqual(macho, MACHO)
 
 
+class SdkVersionDevice(unittest.TestCase):
+    """asc.py sdk-version, the device build's step: the Mach-O sdk field only, no App Store keys."""
+
+    def run_sdk_version(self, version="27.1", with_sdk=True):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            sdk_root = home / "sdk"
+            if with_sdk:
+                sdk = sdk_root / XTOOL
+                sdk.mkdir(parents=True)
+                (sdk / "SDKSettings.json").write_text(json.dumps({
+                    "Version": version, "CanonicalName": "iphoneos" + version,
+                }))
+            app = home / "Example.app"
+            framework = app / "Frameworks/Lib.framework"
+            framework.mkdir(parents=True)
+            original = plistlib.dumps({"CFBundleIdentifier": "org.example.device"})
+            (app / "Info.plist").write_bytes(original)
+            (app / "Example").write_bytes(MACHO)
+            (framework / "Lib").write_bytes(MACHO)
+            (app / "notes.txt").write_text("not a Mach-O")
+            # No SystemVersion.plist and no Xcode version: stamp would stop, sdk-version must not.
+            env = {k: v for k, v in os.environ.items() if k not in ("XCODE_VERSION", "XCODE_BUILD")}
+            env.update(HOME=tmp, DARWIN_SDK=str(sdk_root))
+            done = subprocess.run(
+                [sys.executable, str(ASC), "sdk-version", str(app)],
+                env=env, capture_output=True, text=True, timeout=20, check=False,
+            )
+            return (done, (app / "Info.plist").read_bytes(), original,
+                    (app / "Example").read_bytes(), (framework / "Lib").read_bytes(),
+                    (app / "notes.txt").read_text())
+
+    def test_writes_the_sdk_into_every_macho(self):
+        done, raw, original, app_bin, lib_bin, notes = self.run_sdk_version()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("Mach-O sdk 27.1 in 2 file(s)", done.stdout)
+        for binary in (app_bin, lib_bin):
+            self.assertEqual(struct.unpack_from("<I", binary, 32 + 16)[0], 27 << 16 | 1 << 8)
+            # minos is left alone
+            self.assertEqual(struct.unpack_from("<I", binary, 32 + 12)[0], 0x00110000)
+        self.assertEqual(raw, original)
+        self.assertEqual(notes, "not a Mach-O")
+
+    def test_missing_sdk_leaves_the_app(self):
+        done, raw, original, app_bin, lib_bin, _ = self.run_sdk_version(with_sdk=False)
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("SDKSettings.json", done.stderr)
+        self.assertEqual((app_bin, lib_bin, raw), (MACHO, MACHO, original))
+
+    def test_out_of_range_version_leaves_the_app(self):
+        done, _, _, app_bin, lib_bin, _ = self.run_sdk_version(version="27.256")
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("Version", done.stderr)
+        self.assertEqual((app_bin, lib_bin), (MACHO, MACHO))
+
+    def test_ship_device_path_runs_it(self):
+        ship = (Path(__file__).resolve().parents[1] / "ship.sh").read_text()
+        device = ship[ship.index('if [ "$device" = 1 ]; then'):]
+        device = device[:device.index("  exit 0\n")]
+        self.assertIn('"$PY" "$ASC" sdk-version "$app"', device)
+
+
 if __name__ == "__main__":
     unittest.main()

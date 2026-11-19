@@ -11,7 +11,8 @@
 #   ship.sh --device [TEAMID]
 #                      build for a device install: steps 1-3, then every other
 #                      resource of the app and its extensions copied to the
-#                      bundle roots, as Xcode lays out an app. No signing,
+#                      bundle roots, as Xcode lays out an app, and the SDK
+#                      version written into the Mach-O files. No signing,
 #                      validation or upload; `xtool install xtool/<App>.app`
 #                      signs and installs. With TEAMID, the team-prefix
 #                      placeholders are filled first (tools/fill-team-prefix.py).
@@ -119,12 +120,19 @@ merged = {**plistlib.load(open(target, "rb")), **own}
 if merged != own:
     plistlib.dump(merged, open(bundle, "wb"), fmt=plistlib.FMT_BINARY)' "$target/Info.plist" "$resbundle/Info.plist"
   done
+  echo "== 5. Mach-O SDK version =="
+  # The Linux link writes the deployment target into LC_BUILD_VERSION's sdk
+  # field. iOS takes it for the SDK the app was built with and, below 26, runs
+  # the app in compatibility mode: the pre-iOS 26 design, no Liquid Glass. The
+  # App Store path writes the SDK in step 4 (asc.py stamp); the device build
+  # needs it too to look like the Xcode build.
+  "$PY" "$ASC" sdk-version "$app"
   if [ -n "$team" ]; then
-    echo "== 5. Team prefix =="
+    echo "== 6. Team prefix =="
     [[ "$team" =~ ^[A-Z0-9]{10}$ ]] || { echo "team id '$team' is not a bare 10-character team id" >&2; exit 1; }
     "$PY" "$here/tools/fill-team-prefix.py" --team "$team" "$app"
   fi
-  echo "== 6. Placeholder check =="
+  echo "== 7. Placeholder check =="
   # The device path skips asc.py validate; run its surviving-placeholder FAIL
   # on the .app the same way.
   "$PY" - "$app" "$here/tools" <<'PYEOF'

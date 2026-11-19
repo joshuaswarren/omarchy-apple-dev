@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Device builds carry the SDK version: the iOS 26 design, not compatibility mode
+
+- The Linux link writes the deployment target into the `sdk` field of `LC_BUILD_VERSION` (16.0 for
+  an app with a 16.0 deployment target, built against the 27.1 SDK). iOS reads that field as the SDK
+  the app was built with and runs an app built before the iOS 26 SDK in compatibility mode: the old
+  tab bar, navigation bars and controls instead of Liquid Glass. The App Store path already fixed the
+  field in `asc.py stamp` (ITMS-90725, FINDINGS 33), but `ship.sh --device` stopped before it, so a
+  device build looked different from the Xcode or TestFlight build of the same code.
+- `asc.py sdk-version APP` writes the SDK version of `SDKSettings.json` into every Mach-O of the
+  bundle, the `stamp` code without its App Store keys (no Xcode version or SystemVersion.plist
+  needed). `ship.sh --device` runs it as its step 5; Team prefix and Placeholder check become 6 and 7.
+- `tests/test_asc_stamp.py` gains four rows: both Mach-O files of an app and its framework get 27.1
+  while `minos`, the Info.plist and a non-Mach-O file stay as they were, a missing SDK and an
+  out-of-range version leave the app untouched, and the device path of `ship.sh` calls the command.
+
 ### Icon Composer background fills of kind automatic-gradient
 
 - `actool` (AssetKit) ignored an `icon.json` background of kind `automatic-gradient`

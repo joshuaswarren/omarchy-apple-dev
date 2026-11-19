@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""App Store steps for ship.sh: stamp, frameworks, identity, given-identity, test-identity, validate,
+"""App Store steps for ship.sh: stamp, sdk-version, frameworks, identity, given-identity, test-identity, validate,
 upload, publish.
 
 Runs with the pymobiledevice3 venv's python, which already has `cryptography`.
@@ -103,19 +103,49 @@ def rel(kind, ident):
 
 # -- stamp -------------------------------------------------------------------
 
-def stamp(app_dir, build_number):
-    """Add the build-environment keys App Store processing reads from Info.plist."""
+def iphoneos_sdk():
+    """The iPhoneOS SDK of the darwin bundle and its SDKSettings.json."""
     sdk = SDK / "Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk"
     # Anything at the xtool path, even a file or dangling link, selects it: a broken xtool SDK must fail, not fall back.
     if not os.path.lexists(sdk):
         sdk = SDK / "iPhoneOS.sdk"
-    settings = json.loads((sdk / "SDKSettings.json").read_text())
-    version_plist = sdk / "System/Library/CoreServices/SystemVersion.plist"
-    sdk_build = plistlib.loads(version_plist.read_bytes())["ProductBuildVersion"]
+    return sdk, json.loads((sdk / "SDKSettings.json").read_text())
+
+
+def macho_sdk_raw(settings):
+    """The SDK Version of SDKSettings.json as the Mach-O xxxx.yy.zz field."""
     sdk_major, sdk_minor, sdk_patch = (int(p) for p in (settings["Version"].split(".") + ["0", "0"])[:3])
     if not (0 <= sdk_major <= 0xFFFF and 0 <= sdk_minor <= 0xFF and 0 <= sdk_patch <= 0xFF):
         die(f"SDK Version {settings['Version']} does not fit the Mach-O xxxx.yy.zz field")
-    sdk_raw = sdk_major << 16 | sdk_minor << 8 | sdk_patch
+    return sdk_major << 16 | sdk_minor << 8 | sdk_patch
+
+
+def stamp_macho_sdk(app_dir, sdk_raw):
+    """Set the sdk field of every iOS LC_BUILD_VERSION in the bundle. The number of Mach-O files changed."""
+    patched = 0
+    for path in Path(app_dir).rglob("*"):
+        if path.is_file() and not path.is_symlink() and set_macho_sdk(path, sdk_raw):
+            patched += 1
+    return patched
+
+
+def sdk_version(app_dir):
+    """Write the SDK version into the Mach-O files of a device build, without the App Store keys.
+
+    The Linux link writes the deployment target into LC_BUILD_VERSION's sdk field. iOS reads that
+    field as the SDK the app was built with: below 26 it runs the app in compatibility mode, with
+    the pre-iOS 26 design (no Liquid Glass tab bar, bars or controls), unlike the Xcode build."""
+    _, settings = iphoneos_sdk()
+    patched = stamp_macho_sdk(app_dir, macho_sdk_raw(settings))
+    print(f"Mach-O sdk {settings['Version']} in {patched} file(s)")
+
+
+def stamp(app_dir, build_number):
+    """Add the build-environment keys App Store processing reads from Info.plist."""
+    sdk, settings = iphoneos_sdk()
+    version_plist = sdk / "System/Library/CoreServices/SystemVersion.plist"
+    sdk_build = plistlib.loads(version_plist.read_bytes())["ProductBuildVersion"]
+    sdk_raw = macho_sdk_raw(settings)
     if XCODE_VERSION_PLISTS:
         xcode = plistlib.loads(XCODE_VERSION_PLISTS[-1].read_bytes())
         xcode_version, xcode_build = xcode["CFBundleShortVersionString"], xcode["ProductBuildVersion"]
@@ -163,10 +193,7 @@ def stamp(app_dir, build_number):
             plistlib.dump(bundle_info, f, fmt=plistlib.FMT_BINARY)
     # The Linux link writes the deployment target into LC_BUILD_VERSION's sdk field; App Store
     # processing reads the SDK version from there (ITMS-90725). Record the SDK actually used.
-    patched = 0
-    for path in Path(app_dir).rglob("*"):
-        if path.is_file() and not path.is_symlink() and set_macho_sdk(path, sdk_raw):
-            patched += 1
+    patched = stamp_macho_sdk(app_dir, sdk_raw)
     # App Store processing also rejects .DS_Store junk anywhere in the bundle and
     # an alpha channel in the marketing icon (ITMS-90717); Xcode's actool flattens
     # the icon, the SDK stand-in copies the source PNG through untouched.
@@ -1501,11 +1528,11 @@ def publish(target, notes_path):
 
 
 if __name__ == "__main__":
-    commands = {"stamp": stamp, "frameworks": frameworks, "identity": identity,
+    commands = {"stamp": stamp, "sdk-version": sdk_version, "frameworks": frameworks, "identity": identity,
                 "given-identity": given_identity, "test-identity": test_identity,
                 "validate": validate, "upload": upload, "publish": publish}
     if len(sys.argv) < 2 or sys.argv[1] not in commands:
-        die("usage: asc.py stamp APP BUILD | frameworks APP | identity APP OUTDIR | given-identity APP OUTDIR"
+        die("usage: asc.py stamp APP BUILD | sdk-version APP | frameworks APP | identity APP OUTDIR | given-identity APP OUTDIR"
             " | test-identity APP OUTDIR | validate IPA | upload IPA | publish IPA|APP NOTES_JSON")
     if sys.argv[1] in ("identity", "test-identity"):  # the two commands that reach not_valid_after_utc
         import cryptography
