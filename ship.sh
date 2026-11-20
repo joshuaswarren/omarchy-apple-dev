@@ -15,6 +15,9 @@
 #                      validation or upload; `xtool install xtool/<App>.app`
 #                      signs and installs. With TEAMID, the team-prefix
 #                      placeholders are filled first (tools/fill-team-prefix.py).
+#   ship.sh --simulator
+#                      the same app layout as --device, built for the iOS Simulator
+#                      (arm64-apple-ios-simulator); install it into a booted simulator.
 #
 # BUILD_NUMBER sets CFBundleVersion (default: UTC yyyymmddHHMM, always increasing).
 # XCODE_VERSION/XCODE_BUILD stamp DTXcode when the SDK came from a .xip.
@@ -37,14 +40,18 @@ ACTOOL="${ACTOOL:-$darwin_sdk/Developer/Platforms/iPhoneOS.platform/Developer/us
 PATH="$(dirname "$(readlink -f "$(command -v swift)")"):$HOME/.local/bin:$PATH"
 export PATH
 
-upload=0; device=0; team=
+upload=0; device=0; simulator=0; team=
 case "${1:-}" in
   --upload) upload=1 ;;
   --device) device=1; team=${2:-}
     [ $# -le 2 ] || { echo "usage: ship.sh --device [TEAMID]" >&2; exit 2; } ;;
+  --simulator) device=1; simulator=1 ;;
   "") ;;
-  *) echo "usage: ship.sh [--upload] | [--device [TEAMID]]" >&2; exit 2 ;;
+  *) echo "usage: ship.sh [--upload] | [--device [TEAMID]] | [--simulator]" >&2; exit 2 ;;
 esac
+# actool's --platform: the app's own platform (the iOS car schema either way)
+platform=iphoneos
+[ "$simulator" = 1 ] && platform=iphonesimulator
 if [ "$upload" = 1 ]; then
   : "${ASC_KEY_ID:?--upload needs ASC_KEY_ID}" "${ASC_ISSUER_ID:?--upload needs ASC_ISSUER_ID}"
   : "${ASC_KEY_PATH:?--upload needs ASC_KEY_PATH (the .p8 file)}"
@@ -54,7 +61,11 @@ fi
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT
 echo "== 1. Release build =="
-xtool dev build --configuration "${CONFIGURATION:-release}"
+if [ "$simulator" = 1 ]; then
+  xtool dev build --configuration "${CONFIGURATION:-release}" --triple arm64-apple-ios-simulator
+else
+  xtool dev build --configuration "${CONFIGURATION:-release}"
+fi
 app=$(find xtool -maxdepth 1 -name '*.app' -print -quit)
 [ -n "$app" ] || { echo "no .app under xtool/" >&2; exit 1; }
 
@@ -87,7 +98,7 @@ for target in "$app" "$app"/PlugIns/*.appex; do
 done
 
 echo "== 3. App icon catalog =="
-PY="$PY" ACTOOL="$ACTOOL" "$here/tools/compile-app-icon.sh" "$app"
+PY="$PY" ACTOOL="$ACTOOL" PLATFORM="$platform" "$here/tools/compile-app-icon.sh" "$app"
 
 if [ "$device" = 1 ]; then
   echo "== 4. Root-level resources =="
@@ -141,8 +152,12 @@ if bad:
     sys.exit("unresolved $(...) placeholders: " + ", ".join(bad))
 print(f"no unresolved $(...) placeholders in {app}")
 PYEOF
-  echo "device app ready: $app"
-  echo "install with: xtool install $PWD/$app"
+  if [ "$simulator" = 1 ]; then
+    echo "simulator app ready: $app"
+  else
+    echo "device app ready: $app"
+    echo "install with: xtool install $PWD/$app"
+  fi
   exit 0
 fi
 

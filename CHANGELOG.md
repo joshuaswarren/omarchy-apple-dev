@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### `ship.sh --simulator`
+
+- `ship.sh --simulator` builds the app for the iOS Simulator (`xtool dev build --triple
+  arm64-apple-ios-simulator`) and lays it out as `--device` does, without signing. The
+  result installs into a booted simulator.
+- `tools/compile-app-icon.sh` takes actool's `--platform` from `PLATFORM` (default
+  `iphoneos`); `ship.sh --simulator` passes `iphonesimulator`.
+
 ### Icon Composer background fills of kind automatic-gradient
 
 - `actool` (AssetKit) ignored an `icon.json` background of kind `automatic-gradient`
