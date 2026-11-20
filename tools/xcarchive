@@ -1,0 +1,491 @@
+#!/usr/bin/env python3
+"""Lay out an .app bundle and its dSYMs as a standard Xcode .xcarchive.
+
+usage: xcarchive APP [-o OUT.xcarchive] [--dsym PATH]...
+                 [--name NAME] [--scheme NAME]
+                 [--signing-identity IDENTITY] [--team TEAMID]
+                 [--creation-date ISO8601_OR_EPOCH]
+
+Writes Products/Applications/<App>.app, dSYMs/*.dSYM, and the root Info.plist
+keys expected by Xcode's Organizer and altool (ArchiveVersion, CreationDate,
+Name, SchemeName, and ApplicationProperties). Pure Python 3 standard library.
+"""
+import argparse
+import datetime
+import os
+import plistlib
+import re
+import shutil
+import struct
+import sys
+import tempfile
+from pathlib import Path
+
+MH_MAGIC_32 = 0xFEEDFACE
+MH_CIGAM_32 = 0xCEFAEDFE
+MH_MAGIC_64 = 0xFEEDFACF
+MH_CIGAM_64 = 0xCFFAEDFE
+FAT_MAGIC = 0xCAFEBABE
+FAT_CIGAM = 0xBEBAFECA
+FAT_MAGIC_64 = 0xCAFEBABF
+FAT_CIGAM_64 = 0xBFBAFECA
+
+CPU_TYPE_I386 = 7
+CPU_TYPE_ARM = 12
+CPU_TYPE_X86_64 = 0x01000007
+CPU_TYPE_ARM64 = 0x0100000C
+CPU_SUBTYPE_ARM64E = 2
+CPU_SUBTYPE_ARM_V7S = 11
+
+TEAM_RE = re.compile(r"^[A-Z0-9]{10}$")
+REQUIRED_APP_KEYS = (
+    "CFBundleIdentifier",
+    "CFBundleExecutable",
+    "CFBundleShortVersionString",
+    "CFBundleVersion",
+)
+
+
+def die(msg: str) -> None:
+    print(f"xcarchive: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+def parse_creation_date(raw: str | None) -> datetime.datetime:
+    """Return a naive UTC datetime for plistlib XML <date> serialization."""
+    source = raw if raw is not None else os.environ.get("SOURCE_DATE_EPOCH")
+    if source is None or source == "":
+        return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None, microsecond=0)
+    if re.fullmatch(r"-?\d+", source):
+        try:
+            dt = datetime.datetime.fromtimestamp(int(source), tz=datetime.timezone.utc)
+        except (OverflowError, OSError, ValueError) as exc:
+            die(f"invalid timestamp {source!r}: {exc}")
+        return dt.replace(tzinfo=None, microsecond=0)
+    iso = source[:-1] + "+00:00" if source.endswith("Z") else source
+    try:
+        dt = datetime.datetime.fromisoformat(iso)
+    except ValueError as exc:
+        die(f"invalid --creation-date {source!r}: {exc}")
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+    return dt.replace(microsecond=0)
+
+
+def _arch_name(cputype: int, cpusubtype: int) -> str | None:
+    sub = cpusubtype & 0xFF
+    if cputype == CPU_TYPE_ARM64:
+        return "arm64e" if sub == CPU_SUBTYPE_ARM64E else "arm64"
+    if cputype == CPU_TYPE_X86_64:
+        return "x86_64"
+    if cputype == CPU_TYPE_ARM:
+        return "armv7s" if sub == CPU_SUBTYPE_ARM_V7S else "armv7"
+    if cputype == CPU_TYPE_I386:
+        return "i386"
+    return None
+
+
+def macho_architectures(exe_path: Path) -> list[str]:
+    """Return unique Mach-O slice architectures in slice order."""
+    with exe_path.open("rb") as f:
+        header = f.read(8)
+        if len(header) < 8:
+            return []
+        magic_le = struct.unpack_from("<I", header, 0)[0]
+        magic_be = struct.unpack_from(">I", header, 0)[0]
+        slices: list[tuple[int, int]] = []
+
+        if magic_le in (MH_MAGIC_64, MH_MAGIC_32):
+            f.seek(4)
+            ct, st = struct.unpack("<2I", f.read(8))
+            slices.append((ct, st))
+        elif magic_be in (MH_MAGIC_64, MH_MAGIC_32):
+            f.seek(4)
+            ct, st = struct.unpack(">2I", f.read(8))
+            slices.append((ct, st))
+        elif magic_be == FAT_MAGIC or magic_le == FAT_CIGAM:
+            nfat = struct.unpack_from(">I", header, 4)[0]
+            for _ in range(min(nfat, 64)):
+                rec = f.read(20)
+                if len(rec) < 20:
+                    break
+                ct, st, _off, _sz, _align = struct.unpack(">5I", rec)
+                slices.append((ct, st))
+        elif magic_be == FAT_MAGIC_64 or magic_le == FAT_CIGAM_64:
+            nfat = struct.unpack_from(">I", header, 4)[0]
+            for _ in range(min(nfat, 64)):
+                rec = f.read(32)
+                if len(rec) < 32:
+                    break
+                ct, st, _off, _sz, _align, _res = struct.unpack(">2I2Q2I", rec)
+                slices.append((ct, st))
+
+    seen: list[str] = []
+    for ct, st in slices:
+        name = _arch_name(ct, st)
+        if name and name not in seen:
+            seen.append(name)
+    return seen
+
+
+def _read_tlv(data: bytes, pos: int) -> tuple[int, bytes, int]:
+    """Read one ASN.1 DER tag-length-value at pos -> (tag, value_bytes, next_pos)."""
+    if pos >= len(data):
+        raise ValueError("unexpected end of DER")
+    tag = data[pos]
+    pos += 1
+    if tag & 0x1F == 0x1F:
+        while pos < len(data) and (data[pos] & 0x80):
+            pos += 1
+        pos += 1
+    if pos >= len(data):
+        raise ValueError("truncated DER length")
+    first = data[pos]
+    pos += 1
+    if first < 0x80:
+        length = first
+    else:
+        nbytes = first & 0x7F
+        if nbytes == 0 or pos + nbytes > len(data):
+            raise ValueError("invalid DER length")
+        length = int.from_bytes(data[pos:pos + nbytes], "big")
+        pos += nbytes
+    end = pos + length
+    if end > len(data):
+        raise ValueError("truncated DER value")
+    return tag, data[pos:end], end
+
+
+def _iter_tlvs(data: bytes) -> list[tuple[int, bytes]]:
+    items: list[tuple[int, bytes]] = []
+    pos = 0
+    while pos < len(data):
+        tag, val, pos = _read_tlv(data, pos)
+        items.append((tag, val))
+    return items
+
+
+def extract_cert_cn(der_bytes: bytes) -> str | None:
+    """Extract Subject CommonName (OID 2.5.4.3) from a DER X.509 certificate."""
+    try:
+        top_tag, top_val, _ = _read_tlv(der_bytes, 0)
+        if top_tag != 0x30:
+            return None
+        cert_parts = _iter_tlvs(top_val)
+        if not cert_parts or cert_parts[0][0] != 0x30:
+            return None
+        tbs_parts = _iter_tlvs(cert_parts[0][1])
+        idx = 1 if tbs_parts and tbs_parts[0][0] == 0xA0 else 0
+        # TBSCertificate: [version], serialNumber, signature, issuer, validity, subject
+        subject_idx = idx + 4
+        if subject_idx >= len(tbs_parts) or tbs_parts[subject_idx][0] != 0x30:
+            return None
+        for rdn_tag, rdn_val in _iter_tlvs(tbs_parts[subject_idx][1]):
+            if rdn_tag != 0x31:
+                continue
+            for atv_tag, atv_val in _iter_tlvs(rdn_val):
+                if atv_tag != 0x30:
+                    continue
+                pair = _iter_tlvs(atv_val)
+                if len(pair) >= 2 and pair[0] == (0x06, b"\x55\x04\x03"):
+                    val_tag, raw = pair[1]
+                    if val_tag == 0x1E:
+                        text = raw.decode("utf-16-be", errors="replace").strip()
+                    else:
+                        text = raw.decode("utf-8", errors="replace").strip()
+                    if text:
+                        return text
+    except ValueError:
+        return None
+    return None
+
+
+def extract_profile_signing(app_dir: Path) -> tuple[str | None, str | None]:
+    """Read (team, signing_identity) from embedded.mobileprovision if present."""
+    prov_path = app_dir / "embedded.mobileprovision"
+    if not prov_path.is_file():
+        return None, None
+    raw = prov_path.read_bytes()
+    start = raw.find(b"<?xml")
+    end_marker = b"</plist>"
+    end = raw.find(end_marker, start if start >= 0 else 0)
+    if start < 0 or end < 0:
+        return None, None
+    try:
+        payload = plistlib.loads(raw[start:end + len(end_marker)])
+    except Exception:
+        return None, None
+    if not isinstance(payload, dict):
+        return None, None
+
+    team = None
+    team_ids = payload.get("TeamIdentifier")
+    if isinstance(team_ids, list) and team_ids and isinstance(team_ids[0], str):
+        team = team_ids[0].strip() or None
+    if not team:
+        ent_team = payload.get("Entitlements", {}).get("com.apple.developer.team-identifier")
+        if isinstance(ent_team, str) and ent_team.strip():
+            team = ent_team.strip()
+
+    signing_identity = None
+    certs = payload.get("DeveloperCertificates")
+    if isinstance(certs, list):
+        for cert in certs:
+            if isinstance(cert, (bytes, bytearray)):
+                cn = extract_cert_cn(bytes(cert))
+                if cn:
+                    signing_identity = cn
+                    break
+    return team, signing_identity
+
+
+def discover_icon_paths(app_dir: Path, app_info: dict) -> list[str]:
+    """Find top-level PNG icons declared in Info.plist, relative to Products/."""
+    prefixes: list[str] = []
+
+    def add_prefix(value: object) -> None:
+        if isinstance(value, str) and value.strip():
+            stem = value.strip()
+            if stem.lower().endswith(".png"):
+                stem = stem[:-4]
+            if stem and stem not in prefixes:
+                prefixes.append(stem)
+
+    for key in ("CFBundleIcons", "CFBundleIcons~ipad"):
+        icons_dict = app_info.get(key)
+        if not isinstance(icons_dict, dict):
+            continue
+        primary = icons_dict.get("CFBundlePrimaryIcon")
+        if not isinstance(primary, dict):
+            continue
+        for entry in primary.get("CFBundleIconFiles") or []:
+            add_prefix(entry)
+        add_prefix(primary.get("CFBundleIconName"))
+    for entry in app_info.get("CFBundleIconFiles") or []:
+        add_prefix(entry)
+    add_prefix(app_info.get("CFBundleIconFile"))
+
+    if not prefixes:
+        return []
+    matched: list[str] = []
+    for entry in sorted(app_dir.iterdir(), key=lambda p: p.name):
+        if not entry.is_file() or entry.is_symlink() or entry.suffix.lower() != ".png":
+            continue
+        if any(entry.stem == p or entry.name.startswith(p) for p in prefixes):
+            matched.append(f"Applications/{app_dir.name}/{entry.name}")
+    return matched
+
+
+def validate_app(app_path: Path) -> dict:
+    if not app_path.exists() or not app_path.is_dir():
+        die(f"app bundle does not exist or is not a directory: {app_path}")
+    if not app_path.name.endswith(".app"):
+        die(f"app bundle must end in .app: {app_path}")
+    info_path = app_path / "Info.plist"
+    if not info_path.is_file():
+        die(f"missing Info.plist in {app_path}")
+    try:
+        with info_path.open("rb") as f:
+            info = plistlib.load(f)
+    except Exception as exc:
+        die(f"unreadable Info.plist in {app_path}: {exc}")
+    if not isinstance(info, dict):
+        die(f"Info.plist is not a dictionary in {app_path}")
+    for key in REQUIRED_APP_KEYS:
+        val = info.get(key)
+        if not isinstance(val, str) or not val.strip():
+            die(f"Info.plist in {app_path} is missing required string key {key}")
+    exe_path = app_path / info["CFBundleExecutable"]
+    if not exe_path.is_file():
+        die(f"missing app executable {exe_path}")
+    return info
+
+
+def _validate_dsym_bundle(path: Path) -> None:
+    if not path.is_dir() or not path.name.endswith(".dSYM"):
+        die(f"not a .dSYM bundle directory: {path}")
+    if not (path / "Contents" / "Info.plist").is_file():
+        die(f"missing Contents/Info.plist in {path}")
+    dwarf_dir = path / "Contents" / "Resources" / "DWARF"
+    if not dwarf_dir.is_dir() or not any(p.is_file() for p in dwarf_dir.iterdir()):
+        die(f"missing DWARF payload in {dwarf_dir}")
+
+
+def collect_dsyms(raw_paths: list[str]) -> list[Path]:
+    collected: list[Path] = []
+    seen_names: set[str] = set()
+    for raw in raw_paths:
+        p = Path(raw).resolve()
+        if not p.exists() or not p.is_dir():
+            die(f"dSYM path does not exist or is not a directory: {raw}")
+        if p.name.endswith(".dSYM"):
+            bundles = [p]
+        else:
+            bundles = sorted(
+                (child for child in p.iterdir() if child.is_dir() and child.name.endswith(".dSYM")),
+                key=lambda c: c.name,
+            )
+            if not bundles:
+                die(f"no *.dSYM bundles found in directory: {raw}")
+        for bundle in bundles:
+            _validate_dsym_bundle(bundle)
+            if bundle.name in seen_names:
+                die(f"duplicate dSYM bundle name: {bundle.name}")
+            seen_names.add(bundle.name)
+            collected.append(bundle)
+    return collected
+
+
+def _make_tree_writable(root: Path) -> None:
+    if root.is_symlink():
+        return
+    if root.is_dir():
+        try:
+            os.chmod(root, root.stat().st_mode | 0o700)
+        except OSError:
+            pass
+        for dirpath, dirnames, filenames in os.walk(root):
+            dp = Path(dirpath)
+            for name in dirnames:
+                p = dp / name
+                if not p.is_symlink():
+                    try:
+                        os.chmod(p, p.stat().st_mode | 0o700)
+                    except OSError:
+                        pass
+            for name in filenames:
+                p = dp / name
+                if not p.is_symlink():
+                    try:
+                        os.chmod(p, p.stat().st_mode | 0o200)
+                    except OSError:
+                        pass
+
+
+def write_xcarchive(
+    app_path: Path,
+    app_info: dict,
+    output_path: Path,
+    dsyms: list[Path],
+    name: str,
+    scheme: str,
+    creation_date: datetime.datetime,
+    signing_identity: str | None,
+    team: str | None,
+) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    stage = Path(tempfile.mkdtemp(prefix=".xcarchive-stage-", dir=output_path.parent))
+    backup: Path | None = None
+    try:
+        products_apps = stage / "Products" / "Applications"
+        products_apps.mkdir(parents=True)
+        shutil.copytree(app_path, products_apps / app_path.name, symlinks=True)
+
+        dsyms_dir = stage / "dSYMs"
+        dsyms_dir.mkdir()
+        for dsym in dsyms:
+            shutil.copytree(dsym, dsyms_dir / dsym.name, symlinks=True)
+
+        app_props: dict[str, object] = {
+            "ApplicationPath": f"Applications/{app_path.name}",
+            "CFBundleIdentifier": app_info["CFBundleIdentifier"],
+            "CFBundleShortVersionString": app_info["CFBundleShortVersionString"],
+            "CFBundleVersion": app_info["CFBundleVersion"],
+        }
+        archs = macho_architectures(app_path / app_info["CFBundleExecutable"])
+        if archs:
+            app_props["Architectures"] = archs
+        icons = discover_icon_paths(app_path, app_info)
+        if icons:
+            app_props["IconPaths"] = icons
+        if signing_identity:
+            app_props["SigningIdentity"] = signing_identity
+        if team:
+            app_props["Team"] = team
+
+        archive_plist = {
+            "ApplicationProperties": app_props,
+            "ArchiveVersion": 2,
+            "CreationDate": creation_date,
+            "Name": name,
+            "SchemeName": scheme,
+        }
+        with (stage / "Info.plist").open("wb") as f:
+            plistlib.dump(archive_plist, f, fmt=plistlib.FMT_XML, sort_keys=True)
+
+        if os.path.lexists(output_path):
+            fd, backup_raw = tempfile.mkstemp(prefix=".xcarchive-old-", dir=output_path.parent)
+            os.close(fd)
+            os.unlink(backup_raw)
+            backup = Path(backup_raw)
+            os.rename(output_path, backup)
+        os.rename(stage, output_path)
+    except Exception:
+        if backup is not None and os.path.lexists(backup) and not os.path.lexists(output_path):
+            os.rename(backup, output_path)
+        if stage.exists():
+            _make_tree_writable(stage)
+            shutil.rmtree(stage, ignore_errors=True)
+        raise
+
+    if backup is not None and os.path.lexists(backup):
+        _make_tree_writable(backup)
+        shutil.rmtree(backup)
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(
+        prog="xcarchive",
+        description="Package a built .app and its dSYMs into a standard .xcarchive.",
+    )
+    parser.add_argument("app", help="Path to the built .app bundle")
+    parser.add_argument("-o", "--output", help="Output .xcarchive path (default: <app-stem>.xcarchive beside APP)")
+    parser.add_argument("--dsym", action="append", default=[], help="Path to a .dSYM bundle or a directory of *.dSYM bundles (repeatable)")
+    parser.add_argument("--name", help="Archive Name (default: CFBundleName or app stem)")
+    parser.add_argument("--scheme", help="Archive SchemeName (default: Name)")
+    parser.add_argument("--signing-identity", help="Override ApplicationProperties.SigningIdentity")
+    parser.add_argument("--team", help="Override 10-character ApplicationProperties.Team")
+    parser.add_argument("--creation-date", help="ISO-8601 UTC timestamp or integer epoch seconds")
+    args = parser.parse_args(argv)
+
+    app_path = Path(args.app).resolve()
+    app_info = validate_app(app_path)
+
+    output_path = Path(args.output).resolve() if args.output else app_path.parent / f"{app_path.stem}.xcarchive"
+    if not output_path.name.endswith(".xcarchive"):
+        die(f"output path must end in .xcarchive: {output_path}")
+    if output_path == app_path or app_path in output_path.parents or output_path in app_path.parents:
+        die(f"output path {output_path} cannot overlap app bundle {app_path}")
+
+    creation_date = parse_creation_date(args.creation_date)
+    dsyms = collect_dsyms(args.dsym)
+
+    profile_team, profile_identity = extract_profile_signing(app_path)
+    team = args.team.strip() if args.team else profile_team
+    if team is not None and not TEAM_RE.fullmatch(team):
+        die(f"team id {team!r} is not a bare 10-character team id")
+    signing_identity = args.signing_identity.strip() if args.signing_identity else profile_identity
+
+    name = (args.name.strip() if args.name else None) or str(app_info.get("CFBundleName") or "").strip() or app_path.stem
+    scheme = (args.scheme.strip() if args.scheme else None) or name
+
+    write_xcarchive(
+        app_path=app_path,
+        app_info=app_info,
+        output_path=output_path,
+        dsyms=dsyms,
+        name=name,
+        scheme=scheme,
+        creation_date=creation_date,
+        signing_identity=signing_identity,
+        team=team,
+    )
+    print(
+        f"wrote {output_path} ({app_info['CFBundleIdentifier']} "
+        f"{app_info['CFBundleShortVersionString']} ({app_info['CFBundleVersion']}), "
+        f"{len(dsyms)} dSYM(s))"
+    )
+
+
+if __name__ == "__main__":
+    main()
