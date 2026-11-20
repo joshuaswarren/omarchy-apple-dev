@@ -7,6 +7,8 @@
 #
 # usage: tools/compile-app-icon.sh APP
 # PY and ACTOOL override the python and actool used (defaults as in ship.sh).
+# PLATFORM is actool's --platform (default iphoneos; ship.sh --simulator passes
+# iphonesimulator).
 set -euo pipefail
 app=${1:?usage: compile-app-icon.sh APP}
 [ -d "$app" ] || { echo "no app at $app" >&2; exit 1; }
@@ -66,7 +68,7 @@ min=$("$PY" -c 'import plistlib,sys; print(plistlib.load(open(sys.argv[1],"rb"))
 case "${#catalogs[@]}" in
   0) echo "no $icon.appiconset or $icon.icon in the project; App Store upload needs an app icon" ;;
   *)
-    "$ACTOOL" "${catalogs[@]}" --compile "$app" --platform iphoneos --app-icon "$icon" \
+    "$ACTOOL" "${catalogs[@]}" --compile "$app" --platform "${PLATFORM:-iphoneos}" --app-icon "$icon" \
       "${alt_args[@]}" \
       --minimum-deployment-target "$min" --output-partial-info-plist "$stage/icon.plist" \
       --output-format human-readable-text
@@ -92,7 +94,7 @@ for appex in "$app"/PlugIns/*.appex; do
     echo "  $exname: $exicon.appiconset is an empty placeholder; nothing to compile"
     continue
   fi
-  "$ACTOOL" "${exsets[0]}" --compile "$appex" --platform iphoneos --app-icon "$exicon" \
+  "$ACTOOL" "${exsets[0]}" --compile "$appex" --platform "${PLATFORM:-iphoneos}" --app-icon "$exicon" \
     --minimum-deployment-target "$min" --output-partial-info-plist "$stage/$exname-icon.plist" \
     --output-format human-readable-text
   "$PY" -c 'import plistlib,sys; p=sys.argv[1]; d=plistlib.load(open(p,"rb")); d.update(plistlib.load(open(sys.argv[2],"rb")))
