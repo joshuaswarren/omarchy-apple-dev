@@ -73,7 +73,11 @@ whole project; cross-file results appear when that ends.
 1. Run `xtool auth` once and sign in with your Apple ID.
 2. Plug in the iPhone and tap **Trust**.
 3. Run `~/.local/share/omarchy-apple-dev/device-run.sh` from the project
-   directory. It installs and starts the app. For LLDB, follow FINDINGS.md 56.
+   directory. It installs and starts the app. For LLDB, run `device-run.sh
+   --lldb` and read FINDINGS.md 56 first. A static SwiftUI app never re-draws
+   after launch, so a breakpoint in `body` does not fire on tap. Give the app
+   a timer loop (`.task`, `Timer`, or another repeated call) so execution
+   reaches your breakpoint on its own.
 
 ## 4. Upload to TestFlight
 
