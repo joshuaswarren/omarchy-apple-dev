@@ -79,6 +79,10 @@ whole project; cross-file results appear when that ends.
    `LLDB_CMDS` (one command per line) scripts the session, and
    `LLDB_PYTHONHOME` names a CPython 3.12 when the system has none
    (FINDINGS.md 56, receipt `receipts/2026-10-07-device-run-lldb.md`).
+   A static SwiftUI app never re-draws after launch, so a breakpoint in
+   `body` does not fire when you tap. Give the app a timer loop (`.task`,
+   `Timer`, or another repeated call) so execution reaches your breakpoint
+   on its own.
 4. The dev build leaves most resources inside the SwiftPM resource bundle,
    where only `Bundle.module` finds them; an app that reads themes, RTF or JSON
    through `Bundle.main` traps at launch. `ship.sh --device` (with your
