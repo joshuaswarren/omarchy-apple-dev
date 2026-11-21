@@ -125,6 +125,29 @@ This path is proven: a demo app and NetNewsWire, with its widget and share
 extensions, were built, signed and uploaded this way on Linux, and both are
 `VALID` in App Store Connect (FINDINGS.md items 38 and 40).
 
+### Export an Xcode archive (.xcarchive)
+
+Pass `--xcarchive [PATH]` to `ship.sh` (alone or with `--upload`) to write a
+standard `.xcarchive` (default `xtool/<App>.xcarchive`) alongside the `.ipa`:
+
+```
+~/.local/share/omarchy-apple-dev/ship.sh --xcarchive
+```
+
+To wrap any already-built `.app` and its dSYMs directly without running a full
+ship build:
+
+```
+~/.local/share/omarchy-apple-dev/tools/xcarchive xtool/MyApp.app \
+  -o MyApp.xcarchive --dsym path/to/MyApp.app.dSYM
+```
+
+`tools/xcarchive` lays out `Products/Applications/<App>.app`, `dSYMs/`, and
+the root `Info.plist` (`ArchiveVersion`, `CreationDate`, `Name`, `SchemeName`,
+and `ApplicationProperties` with `ApplicationPath`, bundle metadata,
+`Architectures`, `IconPaths`, and signing identity/team from the embedded
+profile) that Xcode's Organizer and `altool` expect.
+
 ## 5. A Mac app
 
 For a SwiftPM package with one executable product (a SwiftUI or AppKit app),

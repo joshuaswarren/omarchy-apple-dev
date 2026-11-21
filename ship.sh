@@ -8,6 +8,10 @@
 #                        ASC_KEY_PATH=/path/to/AuthKey_XXXXXXXXXX.p8
 #                        ASC_ISSUER_ID=<issuer uuid>  ASC_KEY_ID=XXXXXXXXXX
 #                      and the app record created once in App Store Connect.
+#   ship.sh --xcarchive [PATH]
+#                      also package a standard .xcarchive (default:
+#                      xtool/<App>.xcarchive) with Products, dSYMs, and Info.plist
+#                      for Xcode's Organizer and altool (combinable with --upload).
 #   ship.sh --device [TEAMID]
 #                      build for a device install: steps 1-3, then every other
 #                      resource of the app and its extensions copied to the
@@ -40,15 +44,34 @@ ACTOOL="${ACTOOL:-$darwin_sdk/Developer/Platforms/iPhoneOS.platform/Developer/us
 PATH="$(dirname "$(readlink -f "$(command -v swift)")"):$HOME/.local/bin:$PATH"
 export PATH
 
-upload=0; device=0; simulator=0; team=
-case "${1:-}" in
-  --upload) upload=1 ;;
-  --device) device=1; team=${2:-}
-    [ $# -le 2 ] || { echo "usage: ship.sh --device [TEAMID]" >&2; exit 2; } ;;
-  --simulator) device=1; simulator=1 ;;
-  "") ;;
-  *) echo "usage: ship.sh [--upload] | [--device [TEAMID]] | [--simulator]" >&2; exit 2 ;;
-esac
+upload=0; device=0; dev_flag=0; simulator=0; xcarchive=0; xcarchive_out=; team=
+usage() {
+  echo "usage: ship.sh [--upload] [--xcarchive [PATH]] | [--device [TEAMID]] | [--simulator]" >&2
+  exit 2
+}
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --upload) upload=1; shift ;;
+    --xcarchive)
+      xcarchive=1; shift
+      if [ $# -gt 0 ] && [[ "$1" != -* ]]; then xcarchive_out=$1; shift; fi ;;
+    --xcarchive=*)
+      xcarchive=1; xcarchive_out=${1#--xcarchive=}
+      [ -n "$xcarchive_out" ] || usage
+      shift ;;
+    --device)
+      device=1; dev_flag=1; shift
+      if [ $# -gt 0 ] && [[ "$1" != -* ]]; then team=$1; shift; fi ;;
+    --simulator) device=1; simulator=1; shift ;;
+    *) usage ;;
+  esac
+done
+if [ "$device" = 1 ] && { [ "$upload" = 1 ] || [ "$xcarchive" = 1 ]; }; then
+  usage
+fi
+if [ "$dev_flag" = 1 ] && [ "$simulator" = 1 ]; then
+  usage
+fi
 # actool's --platform: the app's own platform (the iOS car schema either way)
 platform=iphoneos
 [ "$simulator" = 1 ] && platform=iphonesimulator
@@ -228,6 +251,44 @@ cp -a "$app" "$stage/Payload/"
 rm -f "$ipa"
 (cd "$stage" && zip -qry "$ipa" Payload)
 echo "wrote $ipa"
+# -- xcarchive-begin --
+if [ "$xcarchive" = 1 ]; then
+  xcarchive_path=${xcarchive_out:-$PWD/xtool/$name.xcarchive}
+  dsym_args=()
+  if [ -n "${DSYMS_DIR:-}" ]; then
+    dsym_args=(--dsym "$DSYMS_DIR")
+  else
+    shopt -s nullglob
+    for d in xtool/*.dSYM; do
+      [ -d "$d" ] && dsym_args+=(--dsym "$d")
+    done
+    shopt -u nullglob
+    if [ "${#dsym_args[@]}" = 0 ] && command -v dsymutil >/dev/null 2>&1; then
+      mkdir -p "$stage/dSYMs"
+      gen_dsym() {
+        local bin=$1 out="$stage/dSYMs/$2.dSYM"
+        [ -f "$bin" ] || return 0
+        dsymutil "$bin" -o "$out" >/dev/null 2>&1 || { rm -rf "$out"; return 0; }
+        if [ -n "$(find "$out/Contents/Resources/DWARF" -type f 2>/dev/null)" ]; then
+          dsym_args+=(--dsym "$out")
+        else
+          rm -rf "$out"
+        fi
+      }
+      gen_dsym "$app/$name" "$name.app"
+      shopt -s nullglob
+      for appex in "$app"/PlugIns/*.appex; do
+        gen_dsym "$appex/$(basename "$appex" .appex)" "$(basename "$appex")"
+      done
+      for fw in "$app"/Frameworks/*.framework; do
+        gen_dsym "$fw/$(basename "$fw" .framework)" "$(basename "$fw")"
+      done
+      shopt -u nullglob
+    fi
+  fi
+  "$PY" "$here/tools/xcarchive" "$app" -o "$xcarchive_path" ${team:+--team "$team"} "${dsym_args[@]}"
+fi
+# -- xcarchive-end --
 
 echo "== 8. Offline App Store validation =="
 "$PY" "$ASC" validate "$ipa"
