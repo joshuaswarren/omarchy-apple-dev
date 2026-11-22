@@ -52,6 +52,9 @@ else
   echo "FAIL ibtool self-test"; sed 's/^/  /' "$tmp_selftest"; fail=1
 fi
 
+echo "== tests/ship-device-stamp/check.sh"
+bash tests/ship-device-stamp/check.sh || fail=1
+
 echo "== tests/install-mode.sh"
 bash tests/install-mode.sh || fail=1
 
