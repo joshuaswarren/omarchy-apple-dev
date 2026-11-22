@@ -230,6 +230,8 @@ def stamp_sdk(app_dir):
     Mach-O walk for the device path, with the plist work skipped.
     """
     sdk_raw, settings = sdk_version_raw()
+    if not Path(app_dir).is_dir():
+        die(f"{app_dir}: not a directory")
     patched = 0
     for path in Path(app_dir).rglob("*"):
         if path.is_file() and not path.is_symlink() and set_macho_sdk(path, sdk_raw):
