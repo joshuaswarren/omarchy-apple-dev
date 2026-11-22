@@ -2,6 +2,7 @@
 import json
 import os
 import plistlib
+import site
 import struct
 import subprocess
 import sys
@@ -10,6 +11,11 @@ import unittest
 from pathlib import Path
 
 ASC = Path(__file__).resolve().parents[1] / "tools/asc.py"
+# HOME=tmp in run_stamp hides the user site-packages the cryptography import
+# needs; the run links the real one into the temp HOME below so site.py picks
+# it up in the normal order (PYTHONPATH would put it first, where a stale
+# typing.py backport in the user site shadows the stdlib typing module).
+USER_SITE = site.getusersitepackages()
 XTOOL = "Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk"
 # Thin arm64 MH_EXECUTE with one iOS LC_BUILD_VERSION (minos 17.0, sdk 26.0).
 MACHO = (struct.pack("<8I", 0xFEEDFACF, 0x0100000C, 0, 2, 1, 24, 0, 0)
@@ -20,6 +26,10 @@ class StampLayouts(unittest.TestCase):
     def run_stamp(self, layouts, version=None):
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
+            site_dir = home / (".local/lib/python%d.%d/site-packages" % (
+                sys.version_info.major, sys.version_info.minor))
+            site_dir.parent.mkdir(parents=True)
+            site_dir.symlink_to(USER_SITE, target_is_directory=True)
             sdk_root = home / "sdk"
             sdk_root.mkdir()
             for layout in layouts:
