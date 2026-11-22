@@ -152,6 +152,12 @@ if bad:
     sys.exit("unresolved $(...) placeholders: " + ", ".join(bad))
 print(f"no unresolved $(...) placeholders in {app}")
 PYEOF
+  echo "== 7. SDK stamp =="
+  # The Linux link writes the deployment target into LC_BUILD_VERSION's sdk
+  # field; iOS 26+ then runs the app in compatibility mode. The App Store path
+  # fixes this in asc.py stamp (ITMS-90725); the device path gets the same
+  # fix here. The device path skips asc.py validate but not this.
+  "$PY" "$here/tools/asc.py" stamp-sdk "$app"
   if [ "$simulator" = 1 ]; then
     echo "simulator app ready: $app"
   else

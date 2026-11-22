@@ -103,19 +103,33 @@ def rel(kind, ident):
 
 # -- stamp -------------------------------------------------------------------
 
-def stamp(app_dir, build_number):
-    """Add the build-environment keys App Store processing reads from Info.plist."""
+def sdk_settings_path():
+    """The SDK stand-in directory, xtool layout first.
+
+    Anything at the xtool path, even a file or dangling link, selects it: a
+    broken xtool SDK must fail, not fall back.
+    """
     sdk = SDK / "Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk"
-    # Anything at the xtool path, even a file or dangling link, selects it: a broken xtool SDK must fail, not fall back.
     if not os.path.lexists(sdk):
         sdk = SDK / "iPhoneOS.sdk"
+    return sdk
+
+
+def sdk_version_raw():
+    """(Mach-O sdk field integer, SDKSettings) from the SDK stand-in."""
+    sdk = sdk_settings_path()
     settings = json.loads((sdk / "SDKSettings.json").read_text())
-    version_plist = sdk / "System/Library/CoreServices/SystemVersion.plist"
-    sdk_build = plistlib.loads(version_plist.read_bytes())["ProductBuildVersion"]
     sdk_major, sdk_minor, sdk_patch = (int(p) for p in (settings["Version"].split(".") + ["0", "0"])[:3])
     if not (0 <= sdk_major <= 0xFFFF and 0 <= sdk_minor <= 0xFF and 0 <= sdk_patch <= 0xFF):
         die(f"SDK Version {settings['Version']} does not fit the Mach-O xxxx.yy.zz field")
-    sdk_raw = sdk_major << 16 | sdk_minor << 8 | sdk_patch
+    return sdk_major << 16 | sdk_minor << 8 | sdk_patch, settings
+
+
+def stamp(app_dir, build_number):
+    """Add the build-environment keys App Store processing reads from Info.plist."""
+    sdk_raw, settings = sdk_version_raw()
+    version_plist = sdk_settings_path() / "System/Library/CoreServices/SystemVersion.plist"
+    sdk_build = plistlib.loads(version_plist.read_bytes())["ProductBuildVersion"]
     if XCODE_VERSION_PLISTS:
         xcode = plistlib.loads(XCODE_VERSION_PLISTS[-1].read_bytes())
         xcode_version, xcode_build = xcode["CFBundleShortVersionString"], xcode["ProductBuildVersion"]
@@ -205,6 +219,24 @@ def set_macho_sdk(path, sdk_raw):
 
 # LC_LOAD_DYLIB, LC_ID_DYLIB, LC_LOAD_WEAK_DYLIB, LC_REEXPORT_DYLIB, LC_LOAD_UPWARD_DYLIB
 DYLIB_COMMANDS = {0xC, 0xD, 0x80000018, 0x8000001F, 0x80000023}
+
+
+def stamp_sdk(app_dir):
+    """Device installs: write the real SDK version into every LC_BUILD_VERSION.
+
+    The Linux link writes the deployment target into the sdk field, and iOS 26+
+    runs an app whose sdk predates the iOS 26 SDK in compatibility mode. The
+    App Store path fixes this inside stamp() (ITMS-90725); this is the same
+    Mach-O walk for the device path, with the plist work skipped.
+    """
+    sdk_raw, settings = sdk_version_raw()
+    patched = 0
+    for path in Path(app_dir).rglob("*"):
+        if path.is_file() and not path.is_symlink() and set_macho_sdk(path, sdk_raw):
+            patched += 1
+    print(f"Mach-O sdk {settings['Version']} in {patched} file(s)")
+
+
 FRAMEWORK_INFO_KEYS = (
     "CFBundleShortVersionString", "CFBundleVersion", "CFBundleSupportedPlatforms", "MinimumOSVersion",
     "UIDeviceFamily", "DTCompiler", "DTPlatformBuild", "DTPlatformName", "DTPlatformVersion", "DTSDKBuild",
@@ -1501,11 +1533,11 @@ def publish(target, notes_path):
 
 
 if __name__ == "__main__":
-    commands = {"stamp": stamp, "frameworks": frameworks, "identity": identity,
+    commands = {"stamp": stamp, "stamp-sdk": stamp_sdk, "frameworks": frameworks, "identity": identity,
                 "given-identity": given_identity, "test-identity": test_identity,
                 "validate": validate, "upload": upload, "publish": publish}
     if len(sys.argv) < 2 or sys.argv[1] not in commands:
-        die("usage: asc.py stamp APP BUILD | frameworks APP | identity APP OUTDIR | given-identity APP OUTDIR"
+        die("usage: asc.py stamp APP BUILD | stamp-sdk APP | frameworks APP | identity APP OUTDIR | given-identity APP OUTDIR"
             " | test-identity APP OUTDIR | validate IPA | upload IPA | publish IPA|APP NOTES_JSON")
     if sys.argv[1] in ("identity", "test-identity"):  # the two commands that reach not_valid_after_utc
         import cryptography
