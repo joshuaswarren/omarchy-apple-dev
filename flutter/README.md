@@ -6,8 +6,8 @@ toolchain `install-toolchain.sh` sets up, and hand the result to
 `xtool install`.
 
 Verified 2026-10-08 on x86_64 with Flutter 3.47.6, swift-bin 6.4.0, the
-iPhoneOS 27.0 SDK and an iPad on iPadOS 27.0 (FINDINGS.md item 64, receipt
-`receipts/2026-10-08-flutter-ios.md`). Release mode, arm64 device builds only.
+iPhoneOS 27.0 SDK and an iPad on iPadOS 27.0
+(receipt `receipts/2026-10-08-flutter-ios.md`). Release mode, arm64 device builds only.
 aarch64 hosts are untested.
 
 ## Use
@@ -46,8 +46,8 @@ has. `flutter assemble` gets `-dFlavor=<scheme>` and
 `TARGET`, else the configuration's `FLUTTER_TARGET`, else `lib/main.dart`.
 
 The app icon set is the configuration's `ASSETCATALOG_COMPILER_APPICON_NAME`
-(a missing set stops the build; one that lists several sizes gets a warning,
-FINDINGS.md item 68), and the storyboards are the ones the Runner target's
+(a missing set stops the build; one that lists several sizes gets a warning),
+and the storyboards are the ones the Runner target's
 Copy Bundle Resources phase lists: localized ones in their `X.lproj`, the rest
 at the bundle root. A launch screen `Info.plist` names that is not among them
 stops the build.
@@ -133,7 +133,7 @@ laptop (i7-8650U).
 | Runner and plugins | Xcode project plus Swift packages | `tools/gen-shell-package.py` writes one SwiftPM package from `.flutter-plugins-dependencies`; SwiftBuild compiles it against `Flutter.framework`. |
 | App extensions (widgets, share, ...) the Runner embeds | Xcode builds each extension target into `PlugIns/<name>.appex` | `tools/gen-extensions.py` reads the extension targets out of `Runner.xcodeproj` and writes a second SwiftPM package: one executable per extension, linked with the extension entry point `_NSExtensionMain` and its own `Info.plist`. `build.sh` compiles it, runs the extension's catalogs through `actool` and its string catalogs through `tools/xcstringstool`, and embeds every `PlugIns/<name>.appex`. Signing covers them: `sign-dev.sh` with a dev profile per extension bundle id (`provision-dev.py --bundle-id ...`), `ship.sh` with the App Store profiles `asc.py identity` already makes per extension. Extensions need packages of their own are not supported yet: their build fails on the unresolved imports. |
 | Icons | `actool` | This repo's Linux `actool`. |
-| Storyboards | `ibtool` | This repo's Linux `ibtool`. Flutter's two template storyboards compile byte-identical to Xcode's (FINDINGS.md item 65). |
+| Storyboards | `ibtool` | This repo's Linux `ibtool`. Flutter's two template storyboards compile byte-identical to Xcode's. |
 | `Info.plist` | Xcode | `tools/gen-info-plist.py`. It expands Flutter's own `$(VAR)`s and the Runner target's build settings in the configuration being built, including its xcconfig (`Flutter/Release.xcconfig`) and the files it includes. |
 
 ## Things that would otherwise bite

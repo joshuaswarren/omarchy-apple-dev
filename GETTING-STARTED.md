@@ -2,7 +2,7 @@
 
 This guide takes a new user from a fresh Omarchy install to an app build in
 TestFlight. Each step names the command to run and what you should see. The
-README has the details and FINDINGS.md has the reasons.
+README has the details.
 
 What you need:
 
@@ -78,7 +78,7 @@ whole project; cross-file results appear when that ends.
    (a few GB) and attaches LLDB, so `frame variable` shows Swift values.
    `LLDB_CMDS` (one command per line) scripts the session, and
    `LLDB_PYTHONHOME` names a CPython 3.12 when the system has none
-   (FINDINGS.md 56, receipt `receipts/2026-10-07-device-run-lldb.md`).
+   (receipt `receipts/2026-10-07-device-run-lldb.md`).
    A static SwiftUI app never re-draws after launch, so a breakpoint in
    `body` does not fire when you tap. Give the app a timer loop (`.task`,
    `Timer`, or another repeated call) so execution reaches your breakpoint
@@ -88,7 +88,7 @@ whole project; cross-file results appear when that ends.
    through `Bundle.main` traps at launch. `ship.sh --device` (with your
    10-character team id when the app reads `$(AppIdentifierPrefix)`) rebuilds
    with every resource at the bundle roots, like Xcode; install the result
-   with `xtool install xtool/<App>.app` (FINDINGS.md 63).
+   with `xtool install xtool/<App>.app`.
    No xtool on the machine that holds the phone? `tools/sign-dev.sh App.app
    out.ipa` signs the result with your development identity and profiles
    (`tools/provision-dev.py`), and `pymobiledevice3 apps install out.ipa`
@@ -123,7 +123,7 @@ never submits a build for review.
 
 This path is proven: a demo app and NetNewsWire, with its widget and share
 extensions, were built, signed and uploaded this way on Linux, and both are
-`VALID` in App Store Connect (FINDINGS.md items 38 and 40).
+`VALID` in App Store Connect.
 
 ### Export an Xcode archive (.xcarchive)
 
@@ -165,7 +165,6 @@ create that certificate in the developer portal: upload a CSR, and put the
 key and certificate as `key.pem` and `cert.pem` in
 `~/.config/omarchy-apple-dev/developer-id/`. Without `--notarize` and without
 the certificate, the app is signed ad hoc and is not notarized for distribution.
-FINDINGS.md item 57 has the details.
 
 ## Toolchain swaps (mise, asdf, manual)
 
@@ -212,8 +211,7 @@ needs none of this.
 
 - `Too many open files`: run `ulimit -n 65536` first.
 - After a Swift toolchain swap (mise, asdf), run `install-toolchain.sh --repair`.
-- Search FINDINGS.md for the exact error text. Most of the errors met so far
-  are listed there with their cause and fix.
+- Run with `bash -x` for the exact failing command and its error text.
 
 ## Remote iPad screen and control
 

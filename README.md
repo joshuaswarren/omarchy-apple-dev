@@ -26,10 +26,10 @@ adds TestFlight and the App Store.
 
 | Date | What ran | Evidence |
 |------|----------|----------|
-| 2026-10-03 | Fresh-user install on x86_64 Arch: Swift 6.4.0, xtool 1.20.1, Xcode 27.0 SDK | [FINDINGS.md](FINDINGS.md) item 22, [receipt](receipts/2026-10-03-xtool-1.20-swift-6.4-x86_64.md) |
+| 2026-10-03 | Fresh-user install on x86_64 Arch: Swift 6.4.0, xtool 1.20.1, Xcode 27.0 SDK | [receipt](receipts/2026-10-03-xtool-1.20-swift-6.4-x86_64.md) |
 | 2026-10-23 | xtool 1.23.0 with made-up credentials: password auth changed from -80045 to Apple's invalid-credential -20970. No real-Apple-ID sign-in, SDK build, device install or LLDB loop on this version | [receipt](receipts/2026-10-23-xtool-1.23.0-auth.md) |
 | 2026-10-25 | Fresh x86_64 Arch install through the SDK-download step, plus interrupted-xtool-install repair with Swift 6.4.1. No SDK build, device install or LLDB loop | [CHANGELOG.md](CHANGELOG.md), *xtool installs again on a fresh machine* |
-| 2026-09-09 | Device install and the LLDB loop on an M1, with Swift 6.3.3, xtool 1.19.0 and the iOS 26.5 SDK. Not re-run on the 6.4 set | [FINDINGS.md](FINDINGS.md), *Working sequence* |
+| 2026-09-09 | Device install and the LLDB loop on an M1, with Swift 6.3.3, xtool 1.19.0 and the iOS 26.5 SDK. Not re-run on the 6.4 set | [Getting started](GETTING-STARTED.md) |
 | 2026-09-15 | x86_64 flow confirmed by a community report (Jon Kinney); the same flow runs a real client project on a Framework Desktop with an iPhone 16 | none |
 
 | Tool | Version | Source |
@@ -74,9 +74,8 @@ What has run on an iPhone and what only builds (no-Xcode mode):
 - For TestFlight and App Store: a paid developer account.
 
 Version matching matters. The SDK must come from an Xcode whose Swift matches
-the installed `swift-bin`: **Xcode 27 for swift-bin 6.4**, Xcode 26 for 6.3
-(FINDINGS.md items 16 and 22). The installer prints the matching Xcode when it
-stops at the SDK step.
+the installed `swift-bin`: **Xcode 27 for swift-bin 6.4**, Xcode 26 for 6.3.
+The installer prints the matching Xcode when it stops at the SDK step.
 
 ## Install
 
@@ -190,7 +189,7 @@ the app's own output and `--symbolicate` pulls and resolves crash reports
 ([docs/CRASH-SYMBOLICATION.md](docs/CRASH-SYMBOLICATION.md)).
 
 Use USB for initial pairing. The Linux wireless RemotePairing path is
-blocked on iOS 26 (FINDINGS.md item 17). On iOS 27, pair once over USB and
+blocked on iOS 26. On iOS 27, pair once over USB and
 copy the pairing record to the host on your tailnet. With Wi-Fi and
 Tailscale connected on the phone, that host can install, launch, screenshot
 and read logs without a cable
@@ -277,8 +276,8 @@ Without a key it signs with a local TEST identity. That proves the pipeline
 only; Apple rejects the signature.
 
 Proven: builds made entirely on Linux are `VALID` in App Store Connect, for
-the demo app (FINDINGS.md item 38) and for NetNewsWire with its extensions and
-15 frameworks (item 40). Signing details, covering entitlements (Associated
+the demo app and for NetNewsWire with its extensions and
+15 frameworks. Signing details, covering entitlements (Associated
 Domains, push, Sign in with Apple), `ROOT_RESOURCES` and Xcode
 `ExportOptions.plist`, are in [docs/SHIPPING.md](docs/SHIPPING.md).
 
@@ -321,8 +320,7 @@ Large projects need `ulimit -n 65536` before `xtool dev build`.
 - [flutter/README.md](flutter/README.md): the Flutter pipeline.
 - [kmp/README.md](kmp/README.md): the iOS framework of a Kotlin
   Multiplatform app, linked on Linux, and the app around it.
-- [FINDINGS.md](FINDINGS.md): dated findings and fixes, with supporting
-  test records under `receipts/`.
+
 
 ## Notes
 
