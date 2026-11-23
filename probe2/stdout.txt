@@ -1,0 +1,6 @@
+/* com.apple.actool.compilation-results */
+/var/folders/rn/78kkqh8x2yv2_wj13sfc9qfh0000gn/T/dmp2p2.ZswBDhKX6l/out/Assets.car
+/var/folders/rn/78kkqh8x2yv2_wj13sfc9qfh0000gn/T/dmp2p2.ZswBDhKX6l/out/T60x60@2x.png
+/var/folders/rn/78kkqh8x2yv2_wj13sfc9qfh0000gn/T/dmp2p2.ZswBDhKX6l/out/T76x76@2x~ipad.png
+/var/folders/rn/78kkqh8x2yv2_wj13sfc9qfh0000gn/T/dmp2p2.ZswBDhKX6l/out/p.plist
+

@@ -15,7 +15,7 @@ today, what each route can prove, and the order to try them.
 
 ## 1. iPhone over Wi-Fi
 
-What is known, from `FINDINGS.md` item 17 and `device-run.sh`:
+What is known, from `device-run.sh` and the LLDB session in `receipts/2026-10-07-device-run-lldb.md`:
 
 - iOS 26.6.2 refused every wireless path for a Linux host. Each host needs its own RemotePairing tunnel, and the phone only
   creates one for a Mac that was paired through Xcode.
