@@ -11,7 +11,9 @@
   for #116: four released builds of a Flutter app kept aborting on iOS 17
   and older; one strong bind into SwiftUICore remained, the
   `_$ss5NeverO7SwiftUI4ViewACWP` `Never: View` witness-table accessor,
-  read with `ipsw` 3.1.745 and a hand-written chained-fixups walker).
+  found with `ipsw` 3.1.745 and confirmed by a hand-written
+  chained-fixups walker reading the `weak_import` bit, which `ipsw`
+  does not display).
   The v0.4.3 note claiming the Sentry 9.x link closure binds no
   SwiftUICore imports was verified against one binary once and does not
   hold in general. The tool now reads the `LC_DYLD_CHAINED_FIXUPS`
@@ -49,7 +51,7 @@
   blobs (blob or imports table out of bounds, unknown imports format or
   fixups version — like dyld, the tool accepts only fixups version 0)
   are rejected before any write, an unknown `--option` is a usage error
-  (exit 2), never taken for a framework name, and input without an
+  (exit 2) instead of a positional framework, and input without an
   arm64 Mach-O slice (not a Mach-O, or a fat file of other architectures
   or with a truncated arch table) is an error instead of a silent no-op
   — a refused binary stays byte-identical.
