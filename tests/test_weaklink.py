@@ -243,7 +243,8 @@ class WeaklinkTests(unittest.TestCase):
     def test_special_ordinals_pass_through_in_format1(self):
         commands = [dylib("SwiftUICore"), chained_fixups([], b"")]
         # 0 = self, 253 = weak lookup (-3), 254 = flat lookup (-2),
-        # 255 = main executable (-1), all read as signed int8.
+        # 255 = main executable (-1) — all past the 0xF0 normal-ordinal
+        # limit, hence special per fixup-chains.h.
         blob = fixups_blob([(0, 0, 0), (253, 0, 8), (254, 0, 16), (255, 0, 24)],
                            imports_format=1)
         commands[1] = chained_fixups(commands[:1], blob)
@@ -257,8 +258,10 @@ class WeaklinkTests(unittest.TestCase):
 
     def test_special_ordinals_pass_through_in_format3(self):
         commands = [dylib("SwiftUICore"), chained_fixups([], b"")]
-        # The same specials in the 16-bit field: 0xFFFD/-3, 0xFFFE/-2,
-        # 0xFFFF/-1 — signed int16, not out-of-list positives.
+        # The same specials in the 16-bit field: 0xFFFD = weak lookup
+        # (-3), 0xFFFE = flat lookup (-2), 0xFFFF = main executable
+        # (-1) — all past the 0xFFF0 normal-ordinal limit, hence
+        # special per fixup-chains.h.
         blob = fixups_blob([(0xFFFD, 0, 0), (0xFFFE, 0, 8), (0xFFFF, 0, 16)],
                            imports_format=3)
         commands[1] = chained_fixups(commands[:1], blob)
@@ -269,6 +272,91 @@ class WeaklinkTests(unittest.TestCase):
         self.assertEqual(self.binary.read_bytes(), data,
                          "16-bit negative specials must stay untouched")
         self.assertIn("nothing to rewrite", result.stdout)
+
+    def test_format1_ordinal_130_is_a_library_index(self):
+        """Pins the fixup-chains.h rule against the old signed reading:
+        in the 8-bit field only 0 and 0xF1..0xFF are special, so
+        ordinal 130 — which an int8 cast turns into -126 — is an
+        ordinary library index and must be weakened, not skipped."""
+        libraries = tuple(f"L{i}" for i in range(129)) + ("SwiftUICore",)
+        libs = [dylib(name) for name in libraries]
+        blob = fixups_blob([(130, 0, 0)])  # strong, bound to ordinal 130
+        commands = libs + [chained_fixups(libs, blob)]
+        data = executable(commands) + blob
+        self.binary.write_bytes(data)
+        result = self.run_cli("--weak-imports", "SwiftUICore")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        expected = bytearray(data)
+        imports_at = self.fixups_layout(commands)
+        struct.pack_into("<I", expected, imports_at,
+                         struct.unpack_from("<I", expected, imports_at)[0] | 0x100)
+        self.assertEqual(self.binary.read_bytes(), bytes(expected),
+                         "ordinal 130 into SwiftUICore must be weakened")
+        self.assertIn("SwiftUICore: 1 strong import -> weak", result.stdout)
+
+    def test_format1_ordinal_limit_is_0xF0_not_the_sign_bit(self):
+        """The 8-bit boundary per fixup-chains.h: 0xF0 (240) is the last
+        normal ordinal, 0xF1..0xFF are the negative specials — so 241
+        stays untouched without an out-of-list error, like 0 and 255."""
+        libraries = tuple(f"L{i}" for i in range(239)) + ("SwiftUICore",)
+        libs = [dylib(name) for name in libraries]
+        blob = fixups_blob([
+            (240, 0, 0),   # 0xF0: last normal ordinal -> weakened
+            (241, 0, 8),   # 0xF1 = weak lookup (-3): special, no error
+            (0, 0, 16),    # self
+            (255, 0, 24),  # main executable (-1)
+        ])
+        commands = libs + [chained_fixups(libs, blob)]
+        data = executable(commands) + blob
+        self.binary.write_bytes(data)
+        result = self.run_cli("--weak-imports", "SwiftUICore")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        expected = bytearray(data)
+        imports_at = self.fixups_layout(commands)
+        struct.pack_into("<I", expected, imports_at,
+                         struct.unpack_from("<I", expected, imports_at)[0] | 0x100)
+        self.assertEqual(self.binary.read_bytes(), bytes(expected),
+                         "only the 0xF0 import may change; 0xF1, 0 and 0xFF stay untouched")
+        self.assertIn("SwiftUICore: 1 strong import -> weak", result.stdout)
+
+    def test_format3_ordinal_0x8000_is_a_library_index(self):
+        """Pins the 16-bit field against the old signed reading: 0x8000
+        is an ordinary library index (an int16 cast would call it
+        -32768 and skip it), 0xFFF1 is the negative-special start."""
+        libraries = tuple(f"L{i}" for i in range(0x7FFF)) + ("SwiftUICore",)
+        libs = [dylib(name) for name in libraries]
+        blob = fixups_blob([(0x8000, 0, 0), (0xFFF1, 0, 8)], imports_format=3)
+        commands = libs + [chained_fixups(libs, blob)]
+        data = executable(commands) + blob
+        self.binary.write_bytes(data)
+        result = self.run_cli("--weak-imports", "SwiftUICore")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        expected = bytearray(data)
+        imports_at = self.fixups_layout(commands)
+        struct.pack_into("<Q", expected, imports_at,
+                         struct.unpack_from("<Q", expected, imports_at)[0] | (1 << 16))
+        self.assertEqual(self.binary.read_bytes(), bytes(expected),
+                         "ordinal 0x8000 must be weakened, 0xFFF1 stay untouched")
+        self.assertIn("SwiftUICore: 1 strong import -> weak", result.stdout)
+
+    def test_format3_ordinal_limit_is_0xFFF0(self):
+        """The 16-bit boundary per fixup-chains.h: 0xFFF0 (65520) is the
+        last normal ordinal, 0xFFF1 (weak lookup) is special."""
+        libraries = tuple(f"L{i}" for i in range(0xFFF0 - 1)) + ("SwiftUICore",)
+        libs = [dylib(name) for name in libraries]
+        blob = fixups_blob([(0xFFF0, 0, 0), (0xFFF1, 0, 8)], imports_format=3)
+        commands = libs + [chained_fixups(libs, blob)]
+        data = executable(commands) + blob
+        self.binary.write_bytes(data)
+        result = self.run_cli("--weak-imports", "SwiftUICore")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        expected = bytearray(data)
+        imports_at = self.fixups_layout(commands)
+        struct.pack_into("<Q", expected, imports_at,
+                         struct.unpack_from("<Q", expected, imports_at)[0] | (1 << 16))
+        self.assertEqual(self.binary.read_bytes(), bytes(expected),
+                         "only the 0xFFF0 import may change; 0xFFF1 stays untouched")
+        self.assertIn("SwiftUICore: 1 strong import -> weak", result.stdout)
 
     def test_lazy_binds_alone_are_refused(self):
         data = executable([dylib("SwiftUICore"),

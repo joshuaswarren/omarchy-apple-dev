@@ -23,13 +23,19 @@
   with the option and no positional frameworks it patches imports only.
   `flutter/build.sh` takes the corresponding `WEAK_IMPORTS` env (spaces
   or commas, default empty) and applies it to the main executable
-  (Runner) only — app extensions keep their real imports — and an
-  explicitly empty `WEAK_FRAMEWORKS` now stays empty, so imports can be
-  weakened without rewriting any load command. Import ordinals are
-  resolved against the dylib load commands dyld itself counts (never
-  `LC_ID_DYLIB`, never `LC_LAZY_LOAD_DYLIB`), read as signed integers of
-  their field width, so the special ordinals (0, main executable, flat
-  and weak lookup) pass through untouched. All three chained-imports
+  (Runner) only — app extensions keep their real imports — and the
+  `SwiftUICore` default of `WEAK_FRAMEWORKS` now applies only when the
+  variable is unset (`${WEAK_FRAMEWORKS-SwiftUICore}`); an explicitly
+  empty value stays empty and disables the load-command rewrite
+  (before, `:-` restored the default for an empty value), so imports
+  can be weakened without rewriting any load command. Import ordinals
+  are resolved against the dylib load commands dyld itself counts
+  (never `LC_ID_DYLIB`, never `LC_LAZY_LOAD_DYLIB`); per Apple's
+  `mach-o/fixup-chains.h` the field is unsigned, so only 0 and the
+  negative specials 0xF1..0xFF (0xFFF1..0xFFFF in the 16-bit field) —
+  self, main executable, flat and weak lookup — pass through
+  untouched, while 1..240 (1..65520) are library indexes and one past
+  the list end is an error, not a silent skip. All three chained-imports
   formats from Apple's `mach-o/fixup-chains.h` are patched; on a real
   binary only format 1 was exercised — formats 2 and 3 are covered by
   unit tests and an `llvm-otool -chained_fixups` cross-check. Classic
@@ -41,15 +47,17 @@
   arm64 Mach-O slice (not a Mach-O, or a fat file of other architectures
   or with a truncated arch table) is an error instead of a silent no-op
   — a refused binary stays byte-identical.
-- `tests/test_weaklink.py` grows from two to nineteen real-CLI tests:
-  the weak bit of all three chained-import formats (format 2 pinned to
-  the header layout with an 8-bit ordinal and a 300 name offset),
-  special ordinals in the 8-bit and the 16-bit field, a second run
-  changing no bytes, `--weak-imports` alone leaving load commands
-  strong, the classic-bind refusal (bind and lazy tables), garbage and
-  wrong-architecture input, a truncated fat table, a fat binary with
-  more than eight slices, malformed-input rejections, and the no-op
-  output.
+- `tests/test_weaklink.py` grows from two to twenty-three real-CLI
+  tests: the weak bit of all three chained-imports formats (format 2
+  pinned to the header layout with an 8-bit ordinal and a 300 name
+  offset), special ordinals in the 8-bit and the 16-bit field, the
+  ordinal limits (130, 240, 0x8000 and 0xFFF0 are ordinary library
+  indexes; 0xF1 and 0xFFF1 are the first specials, untouched and
+  error-free past the list end), a second run changing no bytes,
+  `--weak-imports` alone leaving load commands strong, the classic-bind
+  refusal (bind and lazy tables), garbage and wrong-architecture input,
+  a truncated fat table, a fat binary with more than eight slices,
+  malformed-input rejections, and the no-op output.
 
 ### Installer: python312 builds again when `openssl-3` does not exist
 

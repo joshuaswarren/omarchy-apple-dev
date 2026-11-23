@@ -74,20 +74,23 @@ ORDINAL_DYLIB_CMDS = (LC_LOAD_DYLIB, LC_LOAD_WEAK_DYLIB,
                       LC_REEXPORT_DYLIB, LC_LOAD_UPWARD_DYLIB)
 
 
-def signed_ordinal(value, bits):
-    """lib_ordinal re-read as a signed integer of its field width.
+def is_special_ordinal(raw, bits):
+    """dyld's special-ordinal test for a raw lib_ordinal, per Apple's
+    mach-o/fixup-chains.h (the field is unsigned; its comment "-15 ..
+    240 (0xF1 .. 0xF0)" means 0xF1..0xFF are the negative specials and
+    0xF0 is an ordinary ordinal).
 
-    dyld does the same cast per format when it walks the imports table
-    (common/MachOFile.cpp, forEachChainedFixupTarget: int8_t for the
-    8-bit field, int16_t for the 16-bit one). Values <= 0 are the
-    special ordinals of mach-o/bind.h — BIND_SPECIAL_DYLIB_SELF (0),
-    BIND_SPECIAL_DYLIB_MAIN_EXECUTABLE (-1),
-    BIND_SPECIAL_DYLIB_FLAT_LOOKUP (-2), BIND_SPECIAL_DYLIB_WEAK_LOOKUP
-    (-3) — and never name an entry of the dylib load command list.
+    Special are 0 (BIND_SPECIAL_DYLIB_SELF) and the values past the
+    normal-ordinal limit — 0xF1..0xFF in the 8-bit field, 0xFFF1..0xFFFF
+    in the 16-bit one: main executable (-1), flat lookup (-2), weak
+    lookup (-3). They never name an entry of the dylib load command
+    list. A signed cast of the field instead would misread the ordinary
+    ordinals 128..240 (0x8000..0xFFF0) as negative specials and
+    silently skip real imports in binaries linking more than 127
+    (65535) libraries.
     """
-    if value & (1 << (bits - 1)):
-        return value - (1 << bits)
-    return value
+    limit = 0xF0 if bits == 8 else 0xFFF0
+    return raw == 0 or raw > limit
 
 
 def slices(data):
@@ -202,8 +205,8 @@ def import_writes(data, base, slice_end, info, wants):
         (word,) = struct.unpack_from(code, data, at)
         if word & (1 << weak_shift):
             continue  # already weak
-        ordinal = signed_ordinal(word & ordinal_mask, ordinal_bits)
-        if ordinal <= 0:
+        ordinal = word & ordinal_mask
+        if is_special_ordinal(ordinal, ordinal_bits):
             # Special ordinal (self, main executable, flat lookup, weak
             # lookup): bound to no entry of the dylib list.
             continue
