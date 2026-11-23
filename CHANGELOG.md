@@ -4,9 +4,52 @@
 
 ### weaklink downgrades the symbol imports of weak-linked frameworks
 
-- `flutter/tools/weaklink.py` no longer stops at the load command. A weak `LC_LOAD_WEAK_DYLIB` alone did not stop the launch abort: any symbol still bound STRONGLY against the weak-linked framework aborts dyld at launch on every system where the framework is missing (field report for #116: four released builds of a Flutter app kept aborting on iOS 17 and older; one strong bind into SwiftUICore remained, the `_$ss5NeverO7SwiftUI4ViewACWP` `Never: View` witness-table accessor, confirmed with two independent parsers of the chained-fixups imports table). The v0.4.3 note claiming the Sentry 9.x link closure binds no SwiftUICore imports was verified against one binary once and does not hold in general. The tool now reads the `LC_DYLD_CHAINED_FIXUPS` imports table and downgrades every strong import bound to a weak-linked framework to a weak import; the app must not rely on that framework's functionality on systems where it is absent.
-- New `--weak-imports F1,F2,...` option names frameworks whose imports alone are downgraded, without touching their load commands; `flutter/build.sh` takes the corresponding `WEAK_IMPORTS` env (spaces or commas, default empty) and applies it to the main executable (Runner) only — app extensions keep their real imports. Classic dyld bind opcodes (`LC_DYLD_INFO`/`LC_DYLD_INFO_ONLY` with a non-zero bind table and no chained fixups) are refused with a non-zero exit instead of leaving imports unchecked, and malformed chained-fixups blobs (blob or imports table out of bounds, unknown imports format or fixups version) are rejected before any write, so a refused binary stays byte-identical.
-- `tests/test_weaklink.py` grows from two to ten real-CLI tests: the weak bit of all three chained-import formats, a second run changing no bytes, `--weak-imports` leaving the load command strong, the classic-bind refusal, five malformed-input cases, a two-slice fat binary, and the old load-command-only output when no import matches.
+- `flutter/tools/weaklink.py` no longer stops at the load command. A weak
+  `LC_LOAD_WEAK_DYLIB` alone did not stop the launch abort: any symbol
+  still bound STRONGLY against the weak-linked framework aborts dyld at
+  launch on every system where the framework is missing (field report
+  for #116: four released builds of a Flutter app kept aborting on iOS 17
+  and older; one strong bind into SwiftUICore remained, the
+  `_$ss5NeverO7SwiftUI4ViewACWP` `Never: View` witness-table accessor,
+  read with `ipsw` 3.1.745 and a hand-written chained-fixups walker).
+  The v0.4.3 note claiming the Sentry 9.x link closure binds no
+  SwiftUICore imports was verified against one binary once and does not
+  hold in general. The tool now reads the `LC_DYLD_CHAINED_FIXUPS`
+  imports table and downgrades every strong import bound to a
+  weak-linked framework to a weak import; the app must not rely on that
+  framework's functionality on systems where it is absent.
+- New `--weak-imports F1,F2,...` option names frameworks whose imports
+  alone are downgraded, without touching their load commands; called
+  with the option and no positional frameworks it patches imports only.
+  `flutter/build.sh` takes the corresponding `WEAK_IMPORTS` env (spaces
+  or commas, default empty) and applies it to the main executable
+  (Runner) only — app extensions keep their real imports — and an
+  explicitly empty `WEAK_FRAMEWORKS` now stays empty, so imports can be
+  weakened without rewriting any load command. Import ordinals are
+  resolved against the dylib load commands dyld itself counts (never
+  `LC_ID_DYLIB`, never `LC_LAZY_LOAD_DYLIB`), read as signed integers of
+  their field width, so the special ordinals (0, main executable, flat
+  and weak lookup) pass through untouched. All three chained-imports
+  formats from Apple's `mach-o/fixup-chains.h` are patched; on a real
+  binary only format 1 was exercised — formats 2 and 3 are covered by
+  unit tests and an `llvm-otool -chained_fixups` cross-check. Classic
+  dyld bind opcodes (`LC_DYLD_INFO`/`LC_DYLD_INFO_ONLY` with any
+  non-zero bind table and no chained fixups) are refused with a non-zero
+  exit instead of leaving imports unchecked, malformed chained-fixups
+  blobs (blob or imports table out of bounds, unknown imports format or
+  fixups version) are rejected before any write, and input without an
+  arm64 Mach-O slice (not a Mach-O, or a fat file of other architectures
+  or with a truncated arch table) is an error instead of a silent no-op
+  — a refused binary stays byte-identical.
+- `tests/test_weaklink.py` grows from two to nineteen real-CLI tests:
+  the weak bit of all three chained-import formats (format 2 pinned to
+  the header layout with an 8-bit ordinal and a 300 name offset),
+  special ordinals in the 8-bit and the 16-bit field, a second run
+  changing no bytes, `--weak-imports` alone leaving load commands
+  strong, the classic-bind refusal (bind and lazy tables), garbage and
+  wrong-architecture input, a truncated fat table, a fat binary with
+  more than eight slices, malformed-input rejections, and the no-op
+  output.
 
 ### Installer: python312 builds again when `openssl-3` does not exist
 

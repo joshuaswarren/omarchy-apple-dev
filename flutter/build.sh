@@ -149,8 +149,10 @@ python3 "$here/tools/gen-shell-package.py" "$app" "$shell_pkg" "$MIN_IOS"
 # weak import alongside it: a symbol still bound STRONGLY into the missing
 # framework aborts dyld at launch even when the load command is weak.
 # Env-overridable for apps that import other newer-than-MIN_IOS system
-# frameworks.
-WEAK_FRAMEWORKS=${WEAK_FRAMEWORKS:-SwiftUICore}
+# frameworks. Only an UNSET variable takes the default: an explicitly
+# empty WEAK_FRAMEWORKS disables the load-command rewrite (while
+# WEAK_IMPORTS, if set, still applies to imports alone).
+WEAK_FRAMEWORKS=${WEAK_FRAMEWORKS-SwiftUICore}
 # WEAK_IMPORTS names frameworks (spaces or commas) whose symbol imports
 # alone are made weak, without touching their load commands — in the MAIN
 # executable (Runner) only; app extensions keep their real imports.
@@ -344,9 +346,15 @@ weak_import_args=()
 if [ "${#weak_imports[@]}" -gt 0 ]; then
   weak_import_args=(--weak-imports "$(IFS=,; printf '%s' "${weak_imports[*]}")")
 fi
-if [ -n "${WEAK_FRAMEWORKS:-}" ]; then
+# Runner gets both lists; with only WEAK_IMPORTS set the tool runs
+# without positional frameworks and downgrades imports alone. App
+# extensions (below) never receive WEAK_IMPORTS: they keep their real
+# imports and only get the load-command rewrite from WEAK_FRAMEWORKS.
+if [ -n "${WEAK_FRAMEWORKS:-}" ] || [ "${#weak_imports[@]}" -gt 0 ]; then
   python3 "$here/tools/weaklink.py" "$bundle/Runner" \
     ${weak_import_args+"${weak_import_args[@]}"} $WEAK_FRAMEWORKS
+fi
+if [ -n "${WEAK_FRAMEWORKS:-}" ]; then
   for appex in "$bundle"/PlugIns/*.appex; do
     [ -d "$appex" ] || continue
     python3 "$here/tools/weaklink.py" "$appex/$(basename "${appex%.appex}")" $WEAK_FRAMEWORKS

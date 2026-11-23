@@ -29,10 +29,10 @@ def chained_fixups(other_commands, blob):
     return struct.pack("<4I", LC_DYLD_CHAINED_FIXUPS, 16, dataoff, len(blob))
 
 
-def dyld_info_only(bind_size=16):
-    """An LC_DYLD_INFO_ONLY command with a non-zero bind table."""
+def dyld_info_only(bind_size=16, weak_bind_size=0, lazy_bind_size=0):
+    """An LC_DYLD_INFO_ONLY command with the given bind table sizes."""
     return struct.pack("<12I", LC_DYLD_INFO_ONLY, 48, 0, 0, 0, bind_size,
-                       0, 0, 0, 0, 0, 0)
+                       0, weak_bind_size, 0, lazy_bind_size, 0, 0)
 
 
 def fixups_blob(imports, imports_format=1, fixups_version=0, symbols_format=0,
@@ -41,19 +41,28 @@ def fixups_blob(imports, imports_format=1, fixups_version=0, symbols_format=0,
     (seg_count 0), the imports array, dummy symbol strings.
 
     imports is a list of (ordinal, weak, name_offset[, addend]) tuples;
-    formats 2 and 3 take an addend.
+    formats 2 and 3 take an addend. Entries follow Apple's
+    mach-o/fixup-chains.h: DYLD_CHAINED_IMPORT and
+    DYLD_CHAINED_IMPORT_ADDEND share the first uint32
+    (lib_ordinal:8, weak_import:1 at bit 8, name_offset:23; ADDEND only
+    appends an int32 addend), DYLD_CHAINED_IMPORT_ADDEND64 starts with a
+    uint64 (lib_ordinal:16, weak_import:1 at bit 16, reserved:15,
+    name_offset:32) followed by a uint64 addend.
     """
     entries = b""
     for item in imports:
         ordinal, weak, name_offset = item[0], item[1], item[2]
-        if imports_format == 1:      # uint32 ordinal:8 weak:1 name:23
+        addend = item[3] if len(item) > 3 else 0
+        if imports_format == 1:      # DYLD_CHAINED_IMPORT: one uint32
             entries += struct.pack("<I", (name_offset << 9) | (weak << 8) | ordinal)
-        elif imports_format == 2:    # uint32 ordinal:16 weak:1 name:15, int32 addend
-            entries += struct.pack("<Ii", (name_offset << 17) | (weak << 16) | ordinal,
-                                   item[3])
-        else:                        # uint16 ordinal, uint16 weak:1 name:15, uint16 reserved, 2 pad, uint64 addend
-            entries += struct.pack("<HHH2xQ", ordinal, (name_offset << 1) | weak,
-                                   0, item[3])
+        elif imports_format == 2:    # DYLD_CHAINED_IMPORT_ADDEND: + int32 addend
+            entries += struct.pack("<Ii",
+                                   (name_offset << 9) | (weak << 8) | ordinal,
+                                   addend)
+        else:                        # DYLD_CHAINED_IMPORT_ADDEND64: uint64 + uint64
+            entries += struct.pack("<QQ",
+                                   (name_offset << 32) | (weak << 16) | ordinal,
+                                   addend)
     header = struct.pack("<7I", fixups_version, 28, 32, 32 + len(entries),
                          len(imports), imports_format, symbols_format)
     starts = b"\0\0\0\0"  # dyld_chained_starts_in_image: seg_count 0
@@ -74,15 +83,15 @@ def with_fixups(imports, libraries=("SwiftUICore", "UIKit"), **blob_opts):
     return executable(commands) + blob
 
 
-def fat_image(slices_data, align=12):
-    """A fat Mach-O wrapping the given thin binaries (all arm64)."""
+def fat_image(slices_data, align=12, cpu_type=0x0100000C):
+    """A fat Mach-O wrapping the given thin binaries (one cputype)."""
     header_size = 8 + 20 * len(slices_data)
     out = bytearray(struct.pack(">2I", 0xCAFEBABE, len(slices_data)))
     offset = header_size
     entries = b""
     bodies = b""
     for body in slices_data:
-        entries += struct.pack(">5I", 0x0100000C, 0, offset, len(body), align)
+        entries += struct.pack(">5I", cpu_type, 0, offset, len(body), align)
         bodies += body
         offset += len(body)
     return bytes(out + entries + bodies)
@@ -199,16 +208,146 @@ class WeaklinkTests(unittest.TestCase):
                 expected = bytearray(data)
                 struct.pack_into("<I", expected, 32, LC_LOAD_WEAK_DYLIB)
                 imports_at = self.fixups_layout(commands)
-                if fmt == 1:
+                if fmt in (1, 2):
+                    # weak_import is bit 8 of the first uint32 (both
+                    # formats share that word per fixup-chains.h).
                     struct.pack_into("<I", expected, imports_at, 0x101)
-                elif fmt == 2:
-                    struct.pack_into("<I", expected, imports_at, 0x10001)
-                    struct.pack_into("<i", expected, imports_at + 4, -8)
                 else:
-                    struct.pack_into("<H", expected, imports_at + 2, 1)
-                    struct.pack_into("<Q", expected, imports_at + 8, 1 << 40)
+                    # ADDEND64: weak_import is bit 16 of the first uint64.
+                    struct.pack_into("<Q", expected, imports_at, 0x10001)
                 self.assertEqual(self.binary.read_bytes(), bytes(expected),
                                  "only the weak bit may change; addend and reserved stay byte-identical")
+
+    def test_format2_weak_bit_is_bit_eight_of_an_eight_bit_ordinal(self):
+        """Pins DYLD_CHAINED_IMPORT_ADDEND to the header layout: the weak
+        bit is bit 8, just above an 8-bit lib_ordinal. A name_offset of
+        300 reaches into the bits the old (wrong) layout called the
+        ordinal, so a tool reading ordinal:16/weak:16 would reject or
+        mispatch this file."""
+        commands = [dylib("SwiftUICore"), dylib("UIKit"), chained_fixups([], b"")]
+        blob = fixups_blob([(2, 0, 300, -8)], imports_format=2)
+        commands[2] = chained_fixups(commands[:2], blob)
+        data = executable(commands) + blob
+        self.binary.write_bytes(data)
+        result = self.run_cli("--weak-imports", "UIKit")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        expected = bytearray(data)
+        imports_at = self.fixups_layout(commands)
+        struct.pack_into("<I", expected, imports_at,
+                         struct.unpack_from("<I", expected, imports_at)[0] | 0x100)
+        self.assertEqual(self.binary.read_bytes(), bytes(expected),
+                         "exactly the bit-8 weak flag may change; ordinal, "
+                         "name offset and addend stay byte-identical")
+        self.assertIn("UIKit: 1 strong import -> weak", result.stdout)
+
+    def test_special_ordinals_pass_through_in_format1(self):
+        commands = [dylib("SwiftUICore"), chained_fixups([], b"")]
+        # 0 = self, 253 = weak lookup (-3), 254 = flat lookup (-2),
+        # 255 = main executable (-1), all read as signed int8.
+        blob = fixups_blob([(0, 0, 0), (253, 0, 8), (254, 0, 16), (255, 0, 24)],
+                           imports_format=1)
+        commands[1] = chained_fixups(commands[:1], blob)
+        data = executable(commands) + blob
+        self.binary.write_bytes(data)
+        result = self.run_cli("--weak-imports", "SwiftUICore")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.binary.read_bytes(), data,
+                         "special ordinals must stay untouched")
+        self.assertIn("nothing to rewrite", result.stdout)
+
+    def test_special_ordinals_pass_through_in_format3(self):
+        commands = [dylib("SwiftUICore"), chained_fixups([], b"")]
+        # The same specials in the 16-bit field: 0xFFFD/-3, 0xFFFE/-2,
+        # 0xFFFF/-1 — signed int16, not out-of-list positives.
+        blob = fixups_blob([(0xFFFD, 0, 0), (0xFFFE, 0, 8), (0xFFFF, 0, 16)],
+                           imports_format=3)
+        commands[1] = chained_fixups(commands[:1], blob)
+        data = executable(commands) + blob
+        self.binary.write_bytes(data)
+        result = self.run_cli("--weak-imports", "SwiftUICore")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.binary.read_bytes(), data,
+                         "16-bit negative specials must stay untouched")
+        self.assertIn("nothing to rewrite", result.stdout)
+
+    def test_lazy_binds_alone_are_refused(self):
+        data = executable([dylib("SwiftUICore"),
+                           dyld_info_only(lazy_bind_size=16)])
+        self.binary.write_bytes(data)
+        result = self.run_cli()
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertEqual(self.binary.read_bytes(), data,
+                         "a refused binary must stay unchanged")
+        self.assertIn("classic dyld bind opcodes are not supported", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_input_without_arm64_slice_fails_closed(self):
+        x86 = bytearray(executable([dylib("SwiftUICore")]))
+        struct.pack_into("<I", x86, 4, 0x01000007)  # CPU_TYPE_X86_64
+        cases = {
+            "not a Mach-O": b"\0" * 64,
+            "fat without an arm64 slice": fat_image([bytes(x86)],
+                                                    cpu_type=0x01000007),
+            "fat with zero arches": struct.pack(">2I", 0xCAFEBABE, 0),
+        }
+        for name, data in cases.items():
+            with self.subTest(case=name):
+                self.binary.write_bytes(data)
+                result = self.run_cli()
+                self.assertEqual(result.returncode, 1, result.stdout)
+                self.assertIn("no arm64 Mach-O slice found", result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+
+    def test_truncated_fat_table_fails_closed(self):
+        # Promises three arch entries but carries only one.
+        data = struct.pack(">2I", 0xCAFEBABE, 3) + \
+            struct.pack(">5I", 0x0100000C, 0, 0, 0, 12)
+        self.binary.write_bytes(data)
+        result = self.run_cli()
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("too short for its arch table", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_fat_with_more_than_eight_slices_patches_all(self):
+        body = executable([dylib("SwiftUICore")])
+        data = fat_image([body] * 9)
+        self.binary.write_bytes(data)
+        result = self.run_cli()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        patched = self.binary.read_bytes()
+        self.assertEqual(len(patched), len(data), "file length must not change")
+        base = 8 + 20 * 9
+        for i in range(9):
+            at = base + i * len(body) + 32
+            self.assertEqual(struct.unpack_from("<I", patched, at)[0],
+                             LC_LOAD_WEAK_DYLIB,
+                             f"slice {i} must be patched")
+        self.assertEqual(result.stdout.count("LOAD -> WEAK"), 9)
+
+    def test_weak_imports_alone_is_a_valid_call(self):
+        commands = [dylib("SwiftUI"), chained_fixups([], b"")]
+        blob = fixups_blob([(1, 0, 0)])
+        commands[1] = chained_fixups(commands[:1], blob)
+        data = executable(commands) + blob
+        self.binary.write_bytes(data)
+        result = self.run_cli("--weak-imports", "SwiftUI")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        expected = bytearray(data)
+        imports_at = self.fixups_layout(commands)
+        struct.pack_into("<I", expected, imports_at,
+                         struct.unpack_from("<I", expected, imports_at)[0] | 0x100)
+        self.assertEqual(self.binary.read_bytes(), bytes(expected))
+        self.assertEqual(struct.unpack_from("<I", self.binary.read_bytes(), 32)[0],
+                         LC_LOAD_DYLIB, "the load command must stay strong")
+        self.assertIn("SwiftUI: 1 strong import -> weak", result.stdout)
+
+    def test_call_with_neither_frameworks_nor_imports_is_usage(self):
+        self.binary.write_bytes(executable([dylib("SwiftUICore")]))
+        result = subprocess.run([sys.executable, str(TOOL), str(self.binary)],
+                                capture_output=True, text=True, timeout=5,
+                                check=False)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("Usage:", result.stdout)
 
     def test_malformed_fixups_fail_closed(self):
         blob = fixups_blob([(1, 0, 0)])

@@ -24,10 +24,12 @@ import resolves to NULL instead of killing the process at launch).
 --weak-imports F1,F2,... names frameworks whose imports alone are
 downgraded, without touching their load commands.
 
-Usage: weaklink.py <mach-o> [--weak-imports F1,F2,...] <Framework> [<Framework> ...]
+Usage: weaklink.py <mach-o> [--weak-imports F1,F2,...] [<Framework> ...]
+At least one of --weak-imports or a positional Framework is required.
 Prints one line per rewrite; exit 0 even when nothing matched (the
-framework may legitimately be absent), non-zero only on I/O or parse
-errors.
+framework may legitimately be absent), 2 on bad usage, 1 on I/O or
+parse errors (a file that is not a Mach-O with an arm64 slice counts as
+a parse error).
 """
 
 import struct
@@ -47,27 +49,62 @@ LC_DYLD_INFO = 0x22
 LC_DYLD_INFO_ONLY = 0x80000022
 LC_DYLD_CHAINED_FIXUPS = 0x80000034
 CPU_TYPE_ARM64 = 0x0100000C
-# Dylib ordinals that name something other than an entry of the dylib load
-# command list (flat lookup, main executable, this image, weak flat
-# lookup): an import with one of them is never bound to a real library.
-SPECIAL_DYLIB_ORDINALS = (0, 253, 254, 255)
-# dyld_chained_fixups imports formats -> entry size in bytes.
+# dyld_chained_fixups imports formats -> entry size in bytes. The header
+# carries no packed/alignment attributes, so entries are naturally
+# aligned: 4 (dyld_chained_import), 8 (dyld_chained_import_addend) and 16
+# (dyld_chained_import_addend64). dyld validates exactly these sizes via
+# sizeof() (common/MachOAnalyzer.cpp, validChainedFixupsInfo).
 IMPORT_FORMAT_SIZES = {1: 4, 2: 8, 3: 16}
+# How to read the first word of an entry of each imports_format — the
+# word that carries lib_ordinal and weak_import (struct code, mask over
+# the lib_ordinal bits, bit index of weak_import). Layouts come from
+# Apple's mach-o/fixup-chains.h: DYLD_CHAINED_IMPORT and
+# DYLD_CHAINED_IMPORT_ADDEND share the same first uint32
+# (lib_ordinal:8, weak_import:1, name_offset:23; the ADDEND format only
+# appends an int32 addend), DYLD_CHAINED_IMPORT_ADDEND64 starts with a
+# uint64 (lib_ordinal:16, weak_import:1, reserved:15, name_offset:32)
+# followed by a uint64 addend.
+IMPORT_WORD = {1: ('<I', 0xFF, 8), 2: ('<I', 0xFF, 8), 3: ('<Q', 0xFFFF, 16)}
 # Every load command that occupies a dylib ordinal (1-based, file order):
-# an import's ordinal indexes THIS list, never LC_ID_DYLIB.
+# an import's ordinal indexes THIS list, never LC_ID_DYLIB. This is
+# exactly the command set dyld itself counts as dependent dylibs
+# (common/MachOFile.cpp, forEachDependentDylib); LC_LAZY_LOAD_DYLIB is
+# deliberately absent — dyld does not count it, so it holds no ordinal.
 ORDINAL_DYLIB_CMDS = (LC_LOAD_DYLIB, LC_LOAD_WEAK_DYLIB,
                       LC_REEXPORT_DYLIB, LC_LOAD_UPWARD_DYLIB)
 
 
+def signed_ordinal(value, bits):
+    """lib_ordinal re-read as a signed integer of its field width.
+
+    dyld does the same cast per format when it walks the imports table
+    (common/MachOFile.cpp, forEachChainedFixupTarget: int8_t for the
+    8-bit field, int16_t for the 16-bit one). Values <= 0 are the
+    special ordinals of mach-o/bind.h — BIND_SPECIAL_DYLIB_SELF (0),
+    BIND_SPECIAL_DYLIB_MAIN_EXECUTABLE (-1),
+    BIND_SPECIAL_DYLIB_FLAT_LOOKUP (-2), BIND_SPECIAL_DYLIB_WEAK_LOOKUP
+    (-3) — and never name an entry of the dylib load command list.
+    """
+    if value & (1 << (bits - 1)):
+        return value - (1 << bits)
+    return value
+
+
 def slices(data):
-    """File offsets of the arm64 Mach-O slices (thin -> one at 0)."""
+    """File offsets of the arm64 Mach-O slices (thin -> one at 0).
+
+    Raises ValueError on a fat header that promises more arch entries
+    than the file actually holds (truncated fat table)."""
     magic = struct.unpack_from('<I', data, 0)[0]
     if magic == MH_MAGIC_64:
         return [0]
     if magic == FAT_MAGIC:
         nfat = struct.unpack_from('>I', data, 4)[0]
+        if len(data) < 8 + 20 * nfat:
+            raise ValueError(f'fat header declares {nfat} arches, '
+                             'file too short for its arch table')
         out = []
-        for i in range(min(nfat, 8)):
+        for i in range(nfat):
             off = 8 + i * 20
             if struct.unpack_from('>I', data, off)[0] == CPU_TYPE_ARM64:
                 out.append(struct.unpack_from('>I', data, off + 8)[0])
@@ -113,9 +150,14 @@ def parse_slice(data, base, wants):
         elif cmd == LC_DYLD_CHAINED_FIXUPS:
             info.chained = struct.unpack_from('<II', data, p + 8)
         elif cmd in (LC_DYLD_INFO, LC_DYLD_INFO_ONLY):
-            # dyld_info_command: cmd, cmdsize, rebase_off, rebase_size,
-            # bind_off, bind_size, ... — bind_size is the sixth uint32.
-            if struct.unpack_from('<I', data, p + 20)[0]:
+            # dyld_info_command: its bind_size, weak_bind_size and
+            # lazy_bind_size are the 6th, 8th and 10th uint32. Any
+            # non-zero bind table means the slice binds with classic
+            # opcodes.
+            bind, weak, lazy = (struct.unpack_from('<I', data, p + 20)[0],
+                                struct.unpack_from('<I', data, p + 28)[0],
+                                struct.unpack_from('<I', data, p + 36)[0])
+            if bind or weak or lazy:
                 info.classic_binds = True
         p += cmdsize
     return info
@@ -153,31 +195,25 @@ def import_writes(data, base, slice_end, info, wants):
                          'fixups blob')
     writes = []
     counts = {}
+    code, ordinal_mask, weak_shift = IMPORT_WORD[imports_format]
+    ordinal_bits = 16 if imports_format == 3 else 8
     for i in range(imports_count):
         at = table_start + i * entry_size
-        if imports_format == 1:
-            # DYLD_CHAINED_IMPORT: uint32 lib_ordinal:8, weak_import:1,
-            # name_offset:23 — the weak bit sits at bit 8.
-            addr, code, shift, mask = at, '<I', 8, 0xFF
-        elif imports_format == 2:
-            # DYLD_CHAINED_IMPORT_ADDENDS: uint32 lib_ordinal:16,
-            # weak_import:1, name_offset:15, then int32 addend.
-            addr, code, shift, mask = at, '<I', 16, 0xFFFF
-        else:
-            # DYLD_CHAINED_IMPORT_ADDEND64: uint16 lib_ordinal, uint16
-            # weak_import:1, name_offset:15, uint16 reserved, uint64 addend.
-            addr, code, shift, mask = at + 2, '<H', 0, 0xFFFF
-        (word,) = struct.unpack_from(code, data, addr)
-        ordinal = struct.unpack_from('<I', data, at)[0] & mask
-        if word & (1 << shift) or ordinal in SPECIAL_DYLIB_ORDINALS:
-            continue  # already weak, or bound to no real library
-        if not 1 <= ordinal <= len(info.dylibs):
+        (word,) = struct.unpack_from(code, data, at)
+        if word & (1 << weak_shift):
+            continue  # already weak
+        ordinal = signed_ordinal(word & ordinal_mask, ordinal_bits)
+        if ordinal <= 0:
+            # Special ordinal (self, main executable, flat lookup, weak
+            # lookup): bound to no entry of the dylib list.
+            continue
+        if ordinal > len(info.dylibs):
             raise ValueError(f'chained fixups import {i}: dylib ordinal '
                              f'{ordinal} is outside the slice\'s dylib list '
                              f'of {len(info.dylibs)}')
         framework = info.dylibs[ordinal - 1]
         if framework in wants:
-            writes.append((addr, code, word | (1 << shift)))
+            writes.append((at, code, word | (1 << weak_shift)))
             counts[framework] = counts.get(framework, 0) + 1
     return writes, counts
 
@@ -192,6 +228,8 @@ def rewrite(path, frameworks, weak_imports):
         writes = []
         tallies = {}
         offsets = slices(data)
+        if not offsets:
+            raise ValueError('no arm64 Mach-O slice found')
         for i, base in enumerate(offsets):
             # A slice ends where the next one starts (or at end of file).
             slice_end = offsets[i + 1] if i + 1 < len(offsets) else len(data)
@@ -233,7 +271,7 @@ def main():
             weak_imports += split_frameworks(arg.split('=', 1)[1])
         else:
             rest.append(arg)
-    if len(rest) < 2:
+    if not rest or (len(rest) == 1 and not weak_imports):
         print(__doc__)
         return 2
     path, frameworks = rest[0], rest[1:]
@@ -251,8 +289,8 @@ def main():
             print(f'weaklink: {path}: {framework}: {n} strong '
                   f'import{plural} -> weak')
     if not changed and not counts:
-        print(f'weaklink: {path}: nothing to rewrite '
-              f'({", ".join(frameworks)} not strongly loaded)')
+        named = ', '.join(dict.fromkeys(frameworks + weak_imports))
+        print(f'weaklink: {path}: nothing to rewrite ({named})')
     return 0
 
 
