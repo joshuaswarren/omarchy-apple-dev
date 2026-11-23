@@ -258,11 +258,12 @@ class WeaklinkTests(unittest.TestCase):
 
     def test_special_ordinals_pass_through_in_format3(self):
         commands = [dylib("SwiftUICore"), chained_fixups([], b"")]
-        # The same specials in the 16-bit field: 0xFFFD = weak lookup
-        # (-3), 0xFFFE = flat lookup (-2), 0xFFFF = main executable
-        # (-1) — all past the 0xFFF0 normal-ordinal limit, hence
-        # special per fixup-chains.h.
-        blob = fixups_blob([(0xFFFD, 0, 0), (0xFFFE, 0, 8), (0xFFFF, 0, 16)],
+        # The same specials in the 16-bit field: 0 = self, 0xFFFD =
+        # weak lookup (-3), 0xFFFE = flat lookup (-2), 0xFFFF = main
+        # executable (-1) — all past the 0xFFF0 normal-ordinal limit,
+        # hence special per fixup-chains.h.
+        blob = fixups_blob([(0, 0, 32), (0xFFFD, 0, 0), (0xFFFE, 0, 8),
+                            (0xFFFF, 0, 16)],
                            imports_format=3)
         commands[1] = chained_fixups(commands[:1], blob)
         data = executable(commands) + blob
@@ -318,6 +319,19 @@ class WeaklinkTests(unittest.TestCase):
         self.assertEqual(self.binary.read_bytes(), bytes(expected),
                          "only the 0xF0 import may change; 0xF1, 0 and 0xFF stay untouched")
         self.assertIn("SwiftUICore: 1 strong import -> weak", result.stdout)
+
+    def test_ordinal_241_is_a_library_index_in_format3(self):
+        """Pins the 16-bit width of the format-3 ordinal field: 0x00F1
+        (241) is an ordinary library index, not the 8-bit special 0xF1 —
+        with the default two dylibs it lands one past the list end and
+        is an error, never a silent pass-through."""
+        data = with_fixups([(0x00F1, 0, 0)], imports_format=3)
+        self.binary.write_bytes(data)
+        result = self.run_cli()
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertEqual(self.binary.read_bytes(), data,
+                         "a refused binary must stay unchanged")
+        self.assertIn("dylib ordinal 241", result.stderr)
 
     def test_format3_ordinal_0x8000_is_a_library_index(self):
         """Pins the 16-bit field against the old signed reading: 0x8000
@@ -437,6 +451,17 @@ class WeaklinkTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("Usage:", result.stdout)
 
+    def test_unknown_option_is_usage_and_touches_nothing(self):
+        data = with_fixups([(1, 0, 0)])
+        self.binary.write_bytes(data)
+        result = self.run_cli("--weak-import", "SwiftUICore")
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(self.binary.read_bytes(), data,
+                         "an unknown option must touch no byte")
+        self.assertIn("--weak-import", result.stderr)
+        self.assertIn("Usage:", result.stdout)
+        self.assertNotIn("LOAD -> WEAK", result.stdout)
+
     def test_malformed_fixups_fail_closed(self):
         blob = fixups_blob([(1, 0, 0)])
         libs = [dylib("SwiftUICore")]
@@ -467,6 +492,16 @@ class WeaklinkTests(unittest.TestCase):
                 self.assertEqual(self.binary.read_bytes(), data, "a rejected binary must stay unchanged")
                 self.assertIn("weaklink:", result.stderr)
                 self.assertNotIn("Traceback", result.stderr)
+
+    def test_fixups_version_one_is_refused(self):
+        data = with_fixups([(1, 0, 0)], fixups_version=1)
+        self.binary.write_bytes(data)
+        result = self.run_cli()
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertEqual(self.binary.read_bytes(), data,
+                         "a refused binary must stay unchanged")
+        self.assertIn("fixups version 1", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
 
     def test_classic_binds_are_refused(self):
         data = executable([dylib("SwiftUICore"), dyld_info_only(bind_size=16)])

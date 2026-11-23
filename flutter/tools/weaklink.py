@@ -186,7 +186,10 @@ def import_writes(data, base, slice_end, info, wants):
     (fixups_version, _starts_offset, imports_offset, _symbols_offset,
      imports_count, imports_format, _symbols_format) = \
         struct.unpack_from('<7I', data, blob_start)
-    if fixups_version not in (0, 1):
+    # dyld itself accepts only version 0 (loader/MachOAnalyzer.cpp:
+    # "chained fixups, unknown header version"); fixup-chains.h
+    # documents the field as 0.
+    if fixups_version != 0:
         raise ValueError(f'unsupported chained fixups version {fixups_version}')
     entry_size = IMPORT_FORMAT_SIZES.get(imports_format)
     if entry_size is None:
@@ -272,6 +275,14 @@ def main():
             weak_imports += split_frameworks(args.pop(0))
         elif arg.startswith('--weak-imports='):
             weak_imports += split_frameworks(arg.split('=', 1)[1])
+        elif arg.startswith('--'):
+            # A mistyped option (say --weak-import) would otherwise be
+            # read as a framework name and its value as a positional
+            # framework — silently flipping the very load command the
+            # flag was meant to leave strong.
+            print(f'weaklink: unknown option {arg}', file=sys.stderr)
+            print(__doc__)
+            return 2
         else:
             rest.append(arg)
     if not rest or (len(rest) == 1 and not weak_imports):

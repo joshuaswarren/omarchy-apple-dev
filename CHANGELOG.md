@@ -37,23 +37,33 @@
   untouched, while 1..240 (1..65520) are library indexes and one past
   the list end is an error, not a silent skip. All three chained-imports
   formats from Apple's `mach-o/fixup-chains.h` are patched; on a real
-  binary only format 1 was exercised — formats 2 and 3 are covered by
-  unit tests and an `llvm-otool -chained_fixups` cross-check. Classic
+  binary only format 1 was exercised — format 2 is covered by unit
+  tests and an `llvm-otool -chained_fixups` cross-check, format 3 by
+  unit tests and a decoder written from the header, because
+  `llvm-otool` 19 does not print format-3 entries as the header defines
+  them (it shows the `weak_import` bit under `name_offset` and derives
+  `weak_import` from `name_offset` being non-zero). Classic
   dyld bind opcodes (`LC_DYLD_INFO`/`LC_DYLD_INFO_ONLY` with any
   non-zero bind table and no chained fixups) are refused with a non-zero
   exit instead of leaving imports unchecked, malformed chained-fixups
   blobs (blob or imports table out of bounds, unknown imports format or
-  fixups version) are rejected before any write, and input without an
+  fixups version — like dyld, the tool accepts only fixups version 0)
+  are rejected before any write, an unknown `--option` is a usage error
+  (exit 2), never taken for a framework name, and input without an
   arm64 Mach-O slice (not a Mach-O, or a fat file of other architectures
   or with a truncated arch table) is an error instead of a silent no-op
   — a refused binary stays byte-identical.
-- `tests/test_weaklink.py` grows from two to twenty-three real-CLI
+- `tests/test_weaklink.py` grows from two to twenty-six real-CLI
   tests: the weak bit of all three chained-imports formats (format 2
   pinned to the header layout with an 8-bit ordinal and a 300 name
   offset), special ordinals in the 8-bit and the 16-bit field, the
   ordinal limits (130, 240, 0x8000 and 0xFFF0 are ordinary library
   indexes; 0xF1 and 0xFFF1 are the first specials, untouched and
-  error-free past the list end), a second run changing no bytes,
+  error-free past the list end; 0x00F1 in the 16-bit field is the
+  ordinary index 241, one past a two-dylib list and an error, not the
+  8-bit special), a fixups version other than 0 refused like dyld
+  refuses it, an unknown `--option` rejected as usage without touching
+  the file, a second run changing no bytes,
   `--weak-imports` alone leaving load commands strong, the classic-bind
   refusal (bind and lazy tables), garbage and wrong-architecture input,
   a truncated fat table, a fat binary with more than eight slices,
