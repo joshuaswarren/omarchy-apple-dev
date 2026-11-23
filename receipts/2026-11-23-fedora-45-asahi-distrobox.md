@@ -153,6 +153,51 @@ The host socket is at `/run/host/run/usbmuxd`. After
 prints `true`. After `distrobox stop` and a new `distrobox enter`, the link is
 still there and `idevice_id -l` still lists the phone.
 
+## A SwiftUI app on the iPhone
+
+All inside the container. `xtool auth` signed in with a free Apple ID (`xtool
+auth status`: `Logged in.`). `xtool new HelloOmarchy --skip-setup` wrote the
+SwiftUI template. The bundle ID was set to a unique one, and the `Text` was
+changed so the build is recognisable on the phone. Then:
+
+```
+$ xtool dev build
+Build complete! (5.81 secs)
+Wrote to /home/user/Projects/HelloOmarchy/xtool/HelloOmarchy.app
+$ file xtool/HelloOmarchy.app/HelloOmarchy
+xtool/HelloOmarchy.app/HelloOmarchy: Mach-O 64-bit arm64 executable, ...
+```
+
+`device-run.sh` (default USB mode), from the project directory:
+
+```
+== 2. Trust and pair ==
+Lockdown reachable, pairing OK.
+== 3. List devices via xtool ==
+<device name> [usb]: <udid>
+== 4. Build, sign, install, launch ==
+[Provisioning] 100%
+[Signing] 100%
+[Installing] 100%
+[Verifying] 100%
+Successfully installed!
+```
+
+The default mode installs and stops (`xtool install`); it does not launch.
+The free team installs the app as `XTL-<team>.<bundle id>`, so launching the
+plain bundle ID fails with `FBSOpenApplicationErrorDomain` code 4 `NotFound`
+in the device syslog. With the prefixed ID:
+
+```
+$ pymobiledevice3 developer dvt launch XTL-<team>.com.vintoware.HelloOmarchy
+Process launched with pid 813
+```
+
+`developer dvt proclist` lists `HelloOmarchy` with `"isApplication": true`.
+A `developer dvt screenshot` shows the globe and `Hello from Fedora Asahi`.
+Step 1's `lsusb` check printed `lsusb: command not found` until `usbutils` was
+installed in the container.
+
 ## Not run
 
-- `xtool auth`, an app build, a device install and LLDB.
+- LLDB (`device-run.sh --lldb`).

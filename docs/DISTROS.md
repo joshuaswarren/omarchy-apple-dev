@@ -196,10 +196,13 @@ provisioning/signing/install log, and outstanding limitations.
 Verified 2026-11-23 on Fedora Linux Asahi Remix 45 (kernel
 `7.3.4-401.asahi.fc45.aarch64+16k`, 16K pages): `install-toolchain.sh --mode
 full` ran to `Done.` with Swift 6.4.1 for steps 1-4 and 6.4.2 for the SDK
-step (swift.org UBI 9 builds, installed with mise) and Xcode 27.2 (27B52). It built xtool, registered the iOS, simulator and
-macOS 27.2 SDKs, and installed `actool`, `xcstringstool`, `momc`, `ibtool` and
-OpenAppleMacrosServer. No Apple ID sign-in, app build or device install has
-been run on this setup yet.
+step (swift.org UBI 9 builds, installed with mise) and Xcode 27.2 (27B52).
+It built xtool, registered the iOS, simulator and macOS 27.2 SDKs, and
+installed `actool`, `xcstringstool`, `momc`, `ibtool` and
+OpenAppleMacrosServer. Then, all inside the container: `xtool auth` with a
+free Apple ID, `xtool new` and `xtool dev build` of the SwiftUI template, and
+`device-run.sh`, which installed it on an iPhone 15 (iOS 27.2.1) over USB. The
+app launched and showed its text. LLDB was not run.
 
 The build dependencies live in a distrobox, so the host gets no `-devel`
 packages. distrobox shares `$HOME`, so everything the installer writes
@@ -215,7 +218,7 @@ distrobox enter apple-dev -- sudo dnf install -y --setopt=install_weak_deps=Fals
   libheif-tools poppler-utils python3 python3-devel python3-pip \
   zip unzip rsync xz-devel bzip2-devel zlib-devel libzstd-devel libxml2-devel \
   libcurl-devel libedit-devel fuse3-devel z3-devel ncurses-libs llvm \
-  autoconf automake libtool libxml2_2.13 lld
+  autoconf automake libtool libxml2_2.13 lld usbutils
 distrobox enter apple-dev -- sudo alternatives --install /usr/bin/ld ld /usr/bin/ld.lld 100
 # from your checkout (distrobox keeps the current directory):
 distrobox enter apple-dev -- env XCODE_XIP="$HOME/Downloads/Xcode_27.2.xip" ./install-toolchain.sh --mode full
