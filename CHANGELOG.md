@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Installer: python312 builds again when `openssl-3` does not exist
+
+- The AUR `python312` (3.12.16-2), which Swift 6.4's LLDB links, depends on
+  `openssl-3`. No Arch or AUR package has that name, so step 2 of
+  `install-toolchain.sh` stopped with `could not find all required packages: openssl-3`.
+- When no package provides `openssl-3`, the installer fetches the PKGBUILD,
+  renames that dependency to `openssl` (core/openssl is OpenSSL 3), and builds
+  it with `makepkg -si --asdeps`. When `openssl-3` is available, it installs
+  through yay as before.
+
 ### `ship.sh --simulator`
 
 - `ship.sh --simulator` builds the app for the iOS Simulator (`xtool dev build --triple
