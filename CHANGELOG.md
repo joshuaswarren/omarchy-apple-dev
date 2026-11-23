@@ -1,6 +1,25 @@
 # Changelog
 
-## Unreleased
+## v0.4.7 — 2026-11-24
+
+### Device builds carry the real SDK version
+
+- `asc.py stamp-sdk` writes the actual SDK version into device builds instead
+  of leaving the placeholder, and refuses a build whose stamp it cannot read
+  back (#177).
+
+### Standard xcarchive packaging
+
+- `tools/xcarchive` packages a `.app` and its dSYMs into a standard
+  `.xcarchive` with an Info.plist, so Xcode and third-party symbolication
+  tools open it directly (#175).
+
+### M6 install driver on macOS
+
+- `m6-install` grew a public macOS-side driver: partition writing, image
+  serving, ESP verification, and a hash-tool probe for the ESP test, with the
+  trust boundary stated (#166, #167). The private `tools/m6-install` helper
+  was removed (#168).
 
 ### `ship.sh --simulator`
 
