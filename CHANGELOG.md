@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+### weaklink refuses binaries that carry LC_LAZY_LOAD_DYLIB
+
+- `flutter/tools/weaklink.py` now refuses (exit 1, no byte written) any
+  slice whose load commands include an `LC_LAZY_LOAD_DYLIB` (0x20). The
+  command takes no ordinal in the tool's dylib list, as before: dyld does
+  not count it as a dependent dylib — `MachOFile::forEachDependentDylib`
+  (`common/MachOFile.cpp`) enumerates exactly `LC_LOAD_DYLIB`,
+  `LC_LOAD_WEAK_DYLIB`, `LC_REEXPORT_DYLIB` and `LC_LOAD_UPWARD_DYLIB`,
+  and `LC_LAZY_LOAD_DYLIB` occurs nowhere in the dyld sources — so a lazy
+  command cannot shift the ordinals of the imports that follow it. But
+  the command is obsolete, and a linker that still emits it may number
+  the imports in a way the tool's list cannot mirror, so the tool cannot
+  verify an import's ordinal against the dylib load commands and refuses
+  instead of guessing. The check runs for every slice before any write,
+  so a fat binary with the command in one slice stays byte-identical
+  too. `tests/test_weaklink.py` grows from twenty-six to twenty-nine
+  tests: a lazy command before the strong dylibs is refused with the
+  file unchanged, the same binary without it patches as before, and a
+  lazy command in one slice of a fat binary refuses the whole file.
+
 ### weaklink downgrades the symbol imports of weak-linked frameworks
 
 - `flutter/tools/weaklink.py` no longer stops at the load command. A weak

@@ -9,6 +9,7 @@ TOOL = Path(__file__).resolve().parents[1] / "flutter/tools/weaklink.py"
 
 LC_LOAD_DYLIB = 0xC
 LC_LOAD_WEAK_DYLIB = 0x80000018
+LC_LAZY_LOAD_DYLIB = 0x20
 LC_DYLD_CHAINED_FIXUPS = 0x80000034
 LC_DYLD_INFO_ONLY = 0x80000022
 HEADER_SIZE = 32  # 64-bit Mach-O header: eight uint32
@@ -510,6 +511,72 @@ class WeaklinkTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertEqual(self.binary.read_bytes(), data, "a refused binary must stay unchanged")
         self.assertIn("classic dyld bind opcodes are not supported", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def lazy_binary(self):
+        """A thin executable carrying LC_LAZY_LOAD_DYLIB before the
+        strong dylibs, plus its chained-fixups blob (one strong import
+        bound to SwiftUICore, ordinal 1 — the lazy command holds no
+        ordinal slot)."""
+        blob = fixups_blob([(1, 0, 0)])
+        libs = [dylib("SwiftUICore")]
+        lazy_cmd = dylib("LegacyLib", cmd=LC_LAZY_LOAD_DYLIB)
+        commands = ([lazy_cmd] + libs
+                    + [chained_fixups([lazy_cmd] + libs, blob)])
+        return executable(commands) + blob
+
+    def test_lazy_load_dylib_is_refused(self):
+        """A binary that carries LC_LAZY_LOAD_DYLIB is refused: dyld does
+        not count the command as a dependent dylib, so a linker that
+        emits it may have numbered the imports in a way the tool cannot
+        verify — it refuses instead of guessing."""
+        data = self.lazy_binary()
+        self.binary.write_bytes(data)
+        result = self.run_cli()
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertEqual(self.binary.read_bytes(), data,
+                         "a refused binary must stay unchanged")
+        self.assertIn("LC_LAZY_LOAD_DYLIB present", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_same_binary_without_lazy_load_dylib_patches(self):
+        """The same executable without the lazy command patches as
+        before — the refusal is triggered by the command, not by the
+        fixture's shape."""
+        blob = fixups_blob([(1, 0, 0)])
+        libs = [dylib("SwiftUICore")]
+        commands = libs + [chained_fixups(libs, blob)]
+        data = executable(commands) + blob
+        self.binary.write_bytes(data)
+        result = self.run_cli()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        expected = bytearray(data)
+        struct.pack_into("<I", expected, 32, LC_LOAD_WEAK_DYLIB)
+        imports_at = self.fixups_layout(commands)
+        struct.pack_into("<I", expected, imports_at,
+                         struct.unpack_from("<I", expected, imports_at)[0] | 0x100)
+        self.assertEqual(self.binary.read_bytes(), bytes(expected))
+        self.assertIn("SwiftUICore LOAD -> WEAK", result.stdout)
+        self.assertIn("SwiftUICore: 1 strong import -> weak", result.stdout)
+
+    def test_lazy_load_dylib_in_one_fat_slice_refuses_all(self):
+        """All-or-nothing across a fat binary: a lazy command in one
+        slice refuses the file — no byte of any slice is written."""
+        blob = fixups_blob([(1, 0, 0)])
+        libs = [dylib("SwiftUICore")]
+        clean_commands = libs + [chained_fixups(libs, blob)]
+        clean = executable(clean_commands) + blob
+        lazy_cmd = dylib("LegacyLib", cmd=LC_LAZY_LOAD_DYLIB)
+        lazy_commands = ([lazy_cmd] + libs
+                         + [chained_fixups([lazy_cmd] + libs, blob)])
+        lazy = executable(lazy_commands) + blob
+        data = fat_image([clean, lazy])
+        self.binary.write_bytes(data)
+        result = self.run_cli()
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertEqual(self.binary.read_bytes(), data,
+                         "one refused slice must leave every slice unwritten")
+        self.assertIn("LC_LAZY_LOAD_DYLIB present", result.stderr)
         self.assertNotIn("Traceback", result.stderr)
 
     def test_fat_binary_patches_every_arm64_slice(self):

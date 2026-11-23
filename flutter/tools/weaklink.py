@@ -45,6 +45,11 @@ LC_LOAD_DYLIB = 0xC
 LC_LOAD_WEAK_DYLIB = 0x80000018
 LC_REEXPORT_DYLIB = 0x8000001F
 LC_LOAD_UPWARD_DYLIB = 0x80000023
+# Obsolete since OS X 10.5-era lazy importing and unused by modern
+# toolchains. dyld does not count it as a dependent dylib: it appears
+# nowhere in the dyld sources. Not to be confused with
+# LC_VERSION_MIN_IPHONEOS (0x25).
+LC_LAZY_LOAD_DYLIB = 0x20
 LC_DYLD_INFO = 0x22
 LC_DYLD_INFO_ONLY = 0x80000022
 LC_DYLD_CHAINED_FIXUPS = 0x80000034
@@ -69,7 +74,11 @@ IMPORT_WORD = {1: ('<I', 0xFF, 8), 2: ('<I', 0xFF, 8), 3: ('<Q', 0xFFFF, 16)}
 # an import's ordinal indexes THIS list, never LC_ID_DYLIB. This is
 # exactly the command set dyld itself counts as dependent dylibs
 # (common/MachOFile.cpp, forEachDependentDylib); LC_LAZY_LOAD_DYLIB is
-# deliberately absent — dyld does not count it, so it holds no ordinal.
+# deliberately absent — dyld does not count it, so it holds no ordinal
+# here either. A binary that carries one is refused in import_writes:
+# the command is obsolete, and a linker emitting it may number the
+# imports in a way this list cannot mirror, so the tool cannot verify
+# them and refuses instead of guessing.
 ORDINAL_DYLIB_CMDS = (LC_LOAD_DYLIB, LC_LOAD_WEAK_DYLIB,
                       LC_REEXPORT_DYLIB, LC_LOAD_UPWARD_DYLIB)
 
@@ -135,6 +144,7 @@ class SliceImports:
         self.dylibs = []     # framework dirs in ordinal order (dylibs[0] = ordinal 1)
         self.chained = None  # (dataoff, datasize) of LC_DYLD_CHAINED_FIXUPS
         self.classic_binds = False  # dyld_info with a non-zero bind table
+        self.lazy_load = False  # an LC_LAZY_LOAD_DYLIB command is present
 
 
 def parse_slice(data, base, wants):
@@ -150,6 +160,13 @@ def parse_slice(data, base, wants):
                 info.flips.append((p, name))
         elif cmd in ORDINAL_DYLIB_CMDS:
             info.dylibs.append(framework_of(dylib_name(data, p)))
+        elif cmd == LC_LAZY_LOAD_DYLIB:
+            # No ordinal slot: dyld does not count this command as a
+            # dependent dylib, so appending it here would shift every
+            # later import by one. Its presence alone refuses the slice
+            # (import_writes), because a linker that emits it may have
+            # numbered the imports in a way this list cannot mirror.
+            info.lazy_load = True
         elif cmd == LC_DYLD_CHAINED_FIXUPS:
             info.chained = struct.unpack_from('<II', data, p + 8)
         elif cmd in (LC_DYLD_INFO, LC_DYLD_INFO_ONLY):
@@ -173,6 +190,11 @@ def import_writes(data, base, slice_end, info, wants):
     ValueError on anything unsafe to patch: every check runs before any
     write is made, so a raise leaves the file untouched.
     """
+    if info.lazy_load:
+        raise ValueError('LC_LAZY_LOAD_DYLIB present: this obsolete '
+                         'command is not a dependent dylib for dyld, so '
+                         'its import numbering cannot be verified — '
+                         'refusing to patch')
     if info.chained is None:
         if info.classic_binds:
             raise ValueError('classic dyld bind opcodes are not supported, '
