@@ -21,6 +21,10 @@
 #       headers of images missing from the sysroot, a ~30 s attach whose system
 #       frames show module names only; complete gives full symbols in minutes.
 #       LLDB_PYTHONHOME: a CPython of the version lldb links, when the system has none.
+#       Swift expressions (expression, p, po; no --sudo only): lldb runs from a shadow
+#       toolchain with the iOS SDK's Swift resource dir (tools/lldb-ios-shadow.sh, cached
+#       under ~/.cache/omarchy-apple-dev/lldb-ios) and target.sdk-path set to the iPhoneOS
+#       SDK. LLDB_PLAIN=1 uses the toolchain's lldb as before (frame variable only).
 #   ./device-run.sh --network [--udid U]   WiFi, phone on the SAME network.
 #       TESTED EXHAUSTIVELY 2026-09-16 on iOS 26.6.2: BLOCKED for hosts the
 #       phone has no RemotePairing tunnel with. iOS gives every host its own
@@ -292,7 +296,18 @@ print(d["ProductVersion"] + " (" + d["BuildVersion"] + ")")' "$info")"
   #    from process memory in 512-byte reads, minutes over the tunnel. System frames show
   #    only module names; the app (from disk) and the sysroot's Swift runtime keep symbols.
   #    LLDB_LOAD_LEVEL=complete restores full symbols.
-  local remote pid app exe launched=0 rc=0
+  local remote pid app exe launched=0 rc=0 lldb_bin=lldb sdk_path='' shadow
+  # Swift expressions (expression, p, po) need the iOS SDK's Swift resource dir, which Linux
+  # LLDB cannot find on its own; tools/lldb-ios-shadow.sh gives it one (see its header).
+  # LLDB_PLAIN=1 keeps the toolchain's lldb: frame variable still works, expressions do not.
+  if [ -z "${LLDB_PLAIN:-}" ]; then
+    if shadow=$("$(dirname "$0")/tools/lldb-ios-shadow.sh" 2>&1); then
+      lldb_bin=$(sed -n 1p <<<"$shadow")
+      sdk_path=$(sed -n 2p <<<"$shadow")
+    else
+      echo "note: Swift expressions (p/po) unavailable: $shadow" >&2
+    fi
+  fi
   remote=$("$PMD3" apps list "${UDID_ARGS[@]}" 2>/dev/null | python3 -c '
 import json, sys
 print(json.load(sys.stdin)[sys.argv[1]]["Path"])' "$bid")
@@ -332,9 +347,13 @@ print(json.load(sys.stdin)[sys.argv[1]]["Path"])' "$bid")
   #    that has no process yet, forever (Platform::DoConnectProcess). The next line waits for
   #    the connection and, if there is none, stops lldb with exit 1.
   #  - memory-module-load-level minimal (LLDB_LOAD_LEVEL, see the header).
+  # target.sdk-path goes with the shadow lldb: SwiftShims and the stdlib modules are in the SDK.
   local lcmds=(
     -o "settings set target.memory-module-load-level ${LLDB_LOAD_LEVEL:-minimal}"
     -o "platform select remote-ios --sysroot \"$sym\""
+  )
+  if [ -n "$sdk_path" ]; then lcmds+=(-o "settings set target.sdk-path \"$sdk_path\""); fi
+  lcmds+=(
     -o "target create \"$PWD/$app/$exe\""
     -o "script lldb.target.module[0].SetPlatformFileSpec(lldb.SBFileSpec(\"$remote/$exe\"))"
     -o "script lldb.debugger.SetAsync(True)"
@@ -348,7 +367,7 @@ print(json.load(sys.stdin)[sys.argv[1]]["Path"])' "$bid")
     if [ -n "${LLDB_PYTHONHOME:-}" ]; then
       export PYTHONHOME="$LLDB_PYTHONHOME" LD_LIBRARY_PATH="$LLDB_PYTHONHOME/lib"
     fi
-    exec lldb "${lcmds[@]}"
+    exec "$lldb_bin" "${lcmds[@]}"
   ) || rc=$?
   if [ "$rc" != 0 ] && [ "$launched" = 1 ]; then
     echo "lldb exited with $rc; pid $pid may be left suspended (relaunch the app)" >&2

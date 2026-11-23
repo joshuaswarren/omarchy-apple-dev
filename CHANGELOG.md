@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+### `p`, `po` and `expression` work in `device-run.sh --lldb`
+
+- Swift expressions on the device failed on every Linux host: LLDB found no Xcode Swift
+  resource dir for the iOS target (`HostInfoError`), fell back to its own Linux one, and
+  stopped with `missing required module 'SwiftShims'` (or, with `target.sdk-path` set, a
+  `malformed or corrupted precompiled file` from the Linux `CoreFoundation` module shadowing the
+  SDK's). Only `frame variable` worked.
+- New `tools/lldb-ios-shadow.sh` builds a shadow toolchain in
+  `~/.cache/omarchy-apple-dev/lldb-ios/<hash>/`: `lldb` and `liblldb` hard-linked from the
+  toolchain, with the darwin SDK's `XcodeDefault.xctoolchain/usr/lib/swift` as LLDB's Swift
+  resource dir (it reads it from `<dir of liblldb.so>/swift`) plus the toolchain's `linux/` and
+  `host/`. It is reused while current and rebuilt after a toolchain update.
+- `device-run.sh --lldb` (userspace tunnel path) runs that lldb and sets `target.sdk-path` to the
+  iPhoneOS SDK. On an iPhone 15 with iOS 27.2.1: `p launches * 2` → `84`, `po greeting`,
+  `expression -- greeting.uppercased()`. `LLDB_PLAIN=1` restores the old behaviour; if the
+  script fails, a note is printed and the toolchain's lldb is used. `--sudo` is unchanged.
+- `tests/lldb-ios-shadow/check.sh` (in `tests/run.sh`) checks the tree with stub files.
+  Receipt: `receipts/2026-11-23-device-lldb-expressions.md`.
+
 ## v0.4.7 — 2026-11-24
 
 ### Device builds carry the real SDK version
