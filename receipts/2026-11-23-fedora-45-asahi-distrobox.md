@@ -133,8 +133,26 @@ reports nothing missing.
 `No Swift SDKs are currently installed.` until `XDG_CONFIG_HOME=$HOME/.config`
 is set, because distrobox sets that variable and the host shell does not.
 
+## The iPhone from inside the container
+
+With an iPhone 15 (`iPhone15,4`, iOS 27.2.1) plugged in, the host's `usbmuxd`
+is active and `pymobiledevice3 usbmux list` on the host lists the phone. Inside
+the container there is no socket:
+
+```
+ls: cannot access '/run/usbmuxd': No such file or directory
+$ idevice_id -l
+ERROR: Unable to retrieve device list!
+```
+
+The host socket is at `/run/host/run/usbmuxd`. After
+`sudo ln -sfn /run/host/run/usbmuxd /run/usbmuxd` in the container, `idevice_id
+-l` prints the UDID, and `pymobiledevice3 lockdown info` shows
+`"ProductType": "iPhone15,4"`, `"ProductVersion": "27.2.1"` and
+`"TrustedHostAttached": true`. `pymobiledevice3 amfi developer-mode-status`
+prints `true`. After `distrobox stop` and a new `distrobox enter`, the link is
+still there and `idevice_id -l` still lists the phone.
+
 ## Not run
 
 - `xtool auth`, an app build, a device install and LLDB.
-- Whether the container reaches the host's `usbmuxd` socket (no iPhone was
-  connected; the host's `usbmuxd` is started by udev on plug).

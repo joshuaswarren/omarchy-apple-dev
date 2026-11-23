@@ -254,8 +254,17 @@ Two more things to know:
   `XDG_CONFIG_HOME` looks in `~/.swiftpm/swift-sdks` and lists no SDK. Run
   builds inside the container, where `ld` is also fixed, or export the same
   `XDG_CONFIG_HOME` on the host.
-- Not yet checked: whether the container reaches the host's `usbmuxd` socket
-  for device installs (no iPhone was connected).
+- The container does not see the host's `usbmuxd` socket, so `idevice_id -l`
+  prints `ERROR: Unable to retrieve device list!` there. distrobox mounts the
+  host root at `/run/host`. Link the socket once (the link survives
+  `distrobox stop`):
+
+  ```sh
+  distrobox enter apple-dev -- sudo ln -sfn /run/host/run/usbmuxd /run/usbmuxd
+  ```
+
+  `usbmuxd` itself stays on the host, where udev starts it when the iPhone is
+  plugged in.
 
 Receipt with the quoted errors and versions:
 [`receipts/2026-11-23-fedora-45-asahi-distrobox.md`](../receipts/2026-11-23-fedora-45-asahi-distrobox.md).
