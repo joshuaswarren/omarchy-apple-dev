@@ -2,7 +2,7 @@
 
 2026-10-11 evening (CDT). iPhone 15 Pro Max (iPhone16,2), iOS 27.0.1 (24A446). App: RNProbe, React Native 0.87.1. Install and launch ran from a Linux machine over the tailnet, with `pymobiledevice3 apps install` and `pymobiledevice3 developer dvt launch <bundle id> --stream`. Each launch ran 25 seconds.
 
-This receipt answers the open cause question in `receipts/2026-10-11-rnprobe-launch.md`, with the limits stated below.
+This receipt answers the open cause question in `receipts/2026-10-12-rnprobe-stale-bundle.md`, with the limits stated below.
 
 ## Phone results
 
@@ -12,7 +12,7 @@ This receipt answers the open cause question in `receipts/2026-10-11-rnprobe-lau
 | Rebuilt from the current `App.tsx`, no shim | `54d64ea3ae5ce982` | 4 | All 4 running after 25 s. No `RCTFatalException` in stderr. |
 | Rebuilt, with a no-op `RCTEventEmitter` shim | `35ef56f29213ddb7` | 1 | Running after 25 s. No fatal. |
 
-With the 7 earlier aborts of the original ipa, that build aborted 10 of 10 launches without a debugger. The same build stayed running for 220 s under LLDB (`receipts/2026-10-11-rnprobe-launch.md`, debugger run), so the abort is not 11 of 11. The rebuilt builds have not aborted in 5 launches.
+With the 7 earlier aborts of the original ipa, that build aborted 10 of 10 launches without a debugger. The same build stayed running for 220 s under LLDB (`receipts/2026-10-12-rnprobe-stale-bundle.md`, debugger run), so the abort is not 11 of 11. The rebuilt builds have not aborted in 5 launches.
 
 The earlier receipt records no ipa hash. The hash `44bea4269a9bd489` of the 2026-10-09 ipa ties to the 7 earlier launches by the file path and the dates only.
 

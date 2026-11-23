@@ -6,7 +6,7 @@ compiled, linked, and signed, and a Mach-O lint passed, but no phone ran it. Rec
 
 | Item | Built on Linux | Ran on the iPhone | Receipt and notes |
 |---|---|---|---|
-| Objective-C UIKit hello | yes | yes (label drawn) | `2026-10-09-no-xcode-on-iphone.md` |
+| Objective-C UIKit hello | yes | yes (label drawn) | `2026-10-09-no-xcode-swiftui.md` |
 | Swift console programs (stdlib, async/await, `Foundation`) | yes | yes: output seen for 3 of 6; 2 printed nothing in a 20 s window and left no crash report | same |
 | Flutter counter, release | yes | yes (UI draws) | same |
 | Flutter with `sqflite` and `path_provider` (Objective-C plugins) | yes | yes (UI draws) | same |
@@ -20,7 +20,7 @@ compiled, linked, and signed, and a Mach-O lint passed, but no phone ran it. Rec
 | SwiftUI `Binding` from `@State` | no: no exported symbol on iOS 27.0.1 | no | same |
 | React Native 0.87 with Hermes, release | yes (signed, `macho-lint` 4 of 4 clean) | not yet | `2026-10-09-rn.md`, `sdk-free/react-native/README.md` |
 | React Native third-party Fabric pods (`react-native-safe-area-context`) | no | no | same |
-| Setup without an iPhone (Apple's public iOS update) | yes: 22 stubs match the phone-cut ones byte for byte | same builds as above | `2026-10-09-phone-free-setup.md` |
+| Setup without an iPhone (Apple's public iOS update) | yes: 22 stubs match the phone-cut ones byte for byte | same builds as above | `2026-10-09-no-xcode-testflight.md` |
 | Ubuntu 24.04 container | `setup.sh`, `build-stdlib.sh`, `swiftc.sh` pass | n/a | `docs/DISTROS.md` |
 | Ubuntu x86_64: overlays, Flutter build and full (Xcode) mode; Ubuntu aarch64: full (Xcode) mode | not tested | n/a | `docs/DISTROS.md` |
 | Install with a free Apple ID in this mode | not checked | not checked | `sdk-free/README.md` |

@@ -1,0 +1,146 @@
+issue118 combined review (read-only)
+date: 2026-11-01
+reviewer_scope: static diff + full constructs + callers/CI/fixture/pin only
+NOT run by this review: compiler, unit suite, fixture, installer suite, real account/device/network login
+NOT certified: unrun compiler output, patched GREEN binary, real Apple login
+
+========================================================================
+TREE BINDING
+========================================================================
+
+Source (xtool fork)
+  branch:     omarchy/gsa-user-agent-118
+  commit:     bfa69bf44d632fdd5323e74accb7e7a7ece2e465
+  tree:       55c62ba103128afdc5ef0b910ae35684723ee1ef
+  parent:     f300489f3a3fddbd9fb598ba6cf69eb24a494527
+  subject:    auth: use the anisette provider user-agent
+  worktree:   matches HEAD for the eight paths (only ?? integration-tests/__pycache__/)
+  paths (8):
+    Sources/XKit/GrandSlam/Anisette/ADIDataProvider.swift
+    Sources/XKit/GrandSlam/Anisette/DeviceInfo.swift
+    Sources/XKit/GrandSlam/Anisette/OmnisetteADIProvider.swift
+    Sources/XKit/GrandSlam/Lookup/GrandSlamLookupManager.swift
+    Sources/XKit/GrandSlam/Requests/GrandSlamOperationRequest.swift
+    Sources/XKit/GrandSlam/Requests/GrandSlamTwoFactorRequest.swift
+    integration-tests/gsa-user-agent.py
+    .github/workflows/gsa-user-agent.yml
+
+Upstream #406 identity (GrandSlam only)
+  upstream commit: 70e1568fdfcb20b560774057cd783f02361293b9 (gsa: update user agent #406)
+  six GrandSlam files at bfa69bf: byte-identical to 70e1568 (per-file sha256 match; git diff empty)
+  fork adds beyond upstream: integration-tests/gsa-user-agent.py + .github/workflows/gsa-user-agent.yml
+
+Installer pin (omarchy-apple-dev)
+  branch:  w7C/xtool-auth-pin-118
+  commit:  d1655f25d3028389450c18cdad0a22f9f4518c47
+  tree:    fc10ed774cbd54b9faa0204eb4d0584f1ab3bf03
+  parent:  7bc44ea917e5f1fcd39c066346d43f827b5796f3
+  subject: auth: pin the provider user-agent correction
+  paths (3): install-toolchain.sh, README.md, CHANGELOG.md
+  XTOOL_SHA=bfa69bf44d632fdd5323e74accb7e7a7ece2e465 (exact full match to source HEAD)
+  XTOOL_SDK_VERSION="epoch=4,darwinTools=1.1.0,oam=1.4.1" unchanged/sourcebound
+  no source edits after bfa69bf
+
+Parent-reported (not re-executed here)
+  installer tests/run.sh rc0, 234 unit tests; shellcheck --severity=warning exit0
+  six simview tests skip (no Swift); mac golden regen skip (no xcrun)
+  logs: renewed-integration root/installer-suite.*
+  mutator: 33 sites scanned, no kill claim
+  crapper: CC<=5, coverage N/A
+  dryer: 0 duplicates
+  local Swift unavailable to this review
+  public Linux compile workflow triggered; no patched GREEN binary yet
+  old compiled client RED on loopback lookup static UA (parent evidence)
+
+========================================================================
+SOURCE VERDICT — bfa69bf
+========================================================================
+
+Static provider plumbing: PASS (no concrete defect found)
+
+- RawADIProvider.clientInfo returns ClientInfoWithUserAgent { clientInfo, akdUserAgent }
+- live RawADIProvider remains OmnisetteADIProvider only; UnimplementedRawADIProvider updated
+- Omnisette decodes user_agent via existing convertFromSnakeCase JSONDecoder; maps to akdUserAgent
+- DeviceInfo.akdUserAgent is instance state; static DeviceInfo.akdUserAgent removed
+- UA call sites that previously used the static are updated:
+    GrandSlamLookupManager.performLookup -> deviceInfo.akdUserAgent
+    GrandSlamOperationRequest.configure -> anisetteData.deviceInfo.akdUserAgent
+    GrandSlamTwoFactorRequest.configure -> anisetteData.deviceInfo.akdUserAgent
+- Sole DeviceInfo construction: ADIDataProvider.deviceInfo() passes both fields from cached clientInfo()
+- AnisetteData.deviceInfo carries the instance through GrandSlamClient.send configure path
+- DeviceInfo.dictionary still omits UA (headers set explicitly); same shape as pre-change for clientInfo/deviceID
+- No Tests/ construction of DeviceInfo; no persisted DeviceInfo Codable round-trip found
+- ADIDataProvider.sendRequest (midStart/midFinish provisioning POSTs) never set a GSA UA header
+  before or after this change; pre-existing. Lookup is the first GSA hop and the fixture target.
+  Not introduced by this diff; not a regression vs the removed static default on that path.
+
+Fixture gsa-user-agent.py (static): PASS design for stated goal
+
+- Forces loopback-only via if_nameindex() == {"lo"}; else exit 3 REFUSED
+- CONNECT allowlist only gsa.apple.com:443 and mac-ani.jkcoxson.com:443; else 403
+- Serves v3/client_info JSON with user_agent=MARKER; observes lookup User-Agent; 503 stop
+- Login flow order matches capture: provision -> lookup fetchURL -> deviceInfo/client_info then lookup
+  (GrandSlamClient.fetchAnisetteData before later ops; empty HOME so no saved token short-circuit)
+- Child env: XTL_HTTP_PROXY to fixture, XTL_DISABLE_TLS_VALIDATION=1, disposable HOME, minimal PATH
+- Uses existing Linux HTTP proxy + TLS-disable knobs (AsyncHTTPClient+HTTP.swift); not Darwin URLSession path
+- Timeout default 20s; kill + communicate(5); server.shutdown + thread.join(5); TemporaryDirectory
+- Exit 0 GREEN only if observed[0].user_agent == MARKER; exit 2 RED mismatch; exit 3 no capture
+- Cannot false-GREEN without a real lookup capture; fake credentials only (*.invalid)
+- No outbound Apple/account path when run under --network none as CI does
+
+Workflow gsa-user-agent.yml (static): PASS with one limit (below)
+
+- permissions contents:read; path-filtered; concurrency cancel-in-progress
+- Builds Dockerfile --target dev, adds python3+openssl, swift build --product xtool && swift test
+- Fixture step: docker --network none, ro mounts, binary /.build/debug/xtool (matches debug build)
+- pipefail + tee; artifacts always
+- checkout@v6 consistent with sibling workflows
+
+Quality notes (parent metrics, not re-run): mutator 33 sites no kill; crapper CC<=5 cov N/A; dryer 0.
+
+========================================================================
+INSTALLER PIN VERDICT — d1655f2
+========================================================================
+
+Static pin delta: PASS (no concrete defect found)
+
+- XTOOL_SHA full-length equals source bfa69bf44d632fdd5323e74accb7e7a7ece2e465
+- SDK stamp line unchanged; install_xtool still fetch_commit + release build --product xtool
+- README active version row short pin bfa69bf; CHANGELOG v0.4.3 entry states no sign-in/install/credential change
+- Historical CHANGELOG lines still naming f300489 are prior entries, not the active pin
+- Three-file surface only; no SDK/builder stamp drift in the diff
+
+========================================================================
+CONCRETE FINDINGS
+========================================================================
+
+None that block the static source/pin review.
+
+Limits / non-blocking notes (not defects in the diff bytes):
+
+L1. Workflow job linux-source is gated with
+    if: github.event.repository.private == false
+    Private repos skip the job entirely (success with no proof). Public path is what parent
+    reported as triggered. Do not treat a skipped private run as GREEN proof.
+
+L2. This review did not execute compile, swift test, or the loopback fixture. Parent reports
+    no patched GREEN binary yet and CI compile still pending at review time. Static PASS is
+    not runtime GREEN.
+
+L3. Fixture and workflow are fork additions on top of upstream #406 six-file patch; installer
+    pins the full bfa69bf SHA (six + fixture + workflow), which is correct for reproducing
+    the regression harness after fetch_commit.
+
+L4. No new unit-level test for ClientInfoWithUserAgent plumbing; reliance is compile surface
+    + isolation fixture. Acceptable for this port; not a functional error in the change.
+
+========================================================================
+COMBINED VERDICT
+========================================================================
+
+SOURCE bfa69bf: GREEN (static) — six GrandSlam files == upstream 70e1568; callers complete;
+  fixture/workflow coherent with real client lookup capture and network-none CI intent.
+INSTALLER d1655f2: GREEN (static) — exact SHA pin to bfa69bf; SDK stamp unchanged.
+
+OVERALL issue118 (static): GREEN with limits L1–L4.
+Does NOT certify compiler, fixture GREEN, or real-world login.

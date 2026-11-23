@@ -64,7 +64,7 @@ The swap pair isolates it: the no-xcode binary, storyboards, plist, signing and
 packaging all process fine — the `Assets.car` that actool 27.0 compiles from the
 classic multi-size (19-entry) appiconset never finishes App Store processing, while
 the single-size (one universal 1024 entry) catalog from the same tool is accepted in
-minutes (extends FINDINGS.md 35; recorded as FINDINGS.md 68). A privacy manifest at
+minutes. A privacy manifest at
 the app root was exonerated as the sole cause (probe with none still wedged) and
 `ship.sh` no longer adds one; Flutter.framework still carries the engine's own.
 
