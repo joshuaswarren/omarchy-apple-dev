@@ -31,7 +31,8 @@
 
 - `docs/DISTROS.md` gains a Fedora 45 (aarch64, Asahi) section: a full-mode
   install run inside a distrobox, so the host gets no build packages. It
-  covers two Fedora 45 problems that stop any swift.org UBI 9 toolchain. The
+  covers two Fedora 45 problems that stop the Swift 6.4 swift.org UBI 9
+  toolchains (6.4.1 and 6.4.2 were run). The
   toolchain's `swift-build` and LLDB need `libxml2.so.2`, which Fedora's
   `libxml2_2.13` package provides. SwiftBuild cannot read binutils 2.47's
   `GNU ld version 2.47.20260726`, so every `swift build` fails with

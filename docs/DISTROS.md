@@ -195,8 +195,8 @@ provisioning/signing/install log, and outstanding limitations.
 
 Verified 2026-11-23 on Fedora Linux Asahi Remix 45 (kernel
 `7.3.4-401.asahi.fc45.aarch64+16k`, 16K pages): `install-toolchain.sh --mode
-full` ran to `Done.` with Swift 6.4.2 (swift.org UBI 9 build, installed with
-mise) and Xcode 27.2 (27B52). It built xtool, registered the iOS, simulator and
+full` ran to `Done.` with Swift 6.4.1 for steps 1-4 and 6.4.2 for the SDK
+step (swift.org UBI 9 builds, installed with mise) and Xcode 27.2 (27B52). It built xtool, registered the iOS, simulator and
 macOS 27.2 SDKs, and installed `actool`, `xcstringstool`, `momc`, `ibtool` and
 OpenAppleMacrosServer. No Apple ID sign-in, app build or device install has
 been run on this setup yet.
