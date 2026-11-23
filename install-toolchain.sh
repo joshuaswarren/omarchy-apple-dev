@@ -583,7 +583,24 @@ yay -S --needed --noconfirm swift-bin
 # whatever the installed package asks for; without it lldb fails to start
 # with "libpython3.9.so.1.0: cannot open shared object file".
 pydep=$(pacman -Qi swift-bin | grep -oE 'python3[0-9]+' | head -n1)
-if [ -n "$pydep" ]; then yay -S --needed --noconfirm --asdeps "$pydep"; fi
+if [ -n "$pydep" ] && ! pacman -Q "$pydep" >/dev/null 2>&1; then
+  # The AUR python312 (3.12.16-2) depends on 'openssl-3', a package Arch does
+  # not ship; core/openssl is OpenSSL 3 under its plain name, so yay stops with
+  # "could not find all required packages: openssl-3". When nothing provides
+  # openssl-3, build the PKGBUILD with that dependency renamed to openssl. Its
+  # PKG_CONFIG_PATH=/usr/lib/openssl-3/pkgconfig then names a missing directory
+  # and pkg-config falls back to the system openssl.
+  if ! pacman -Si openssl-3 >/dev/null 2>&1 && yay -Si "$pydep" 2>/dev/null | grep -qw 'openssl-3'; then
+    echo "   $pydep depends on openssl-3, which no package provides; building it against openssl"
+    pybuild=$(mktemp -d)
+    (cd "$pybuild" && yay -G "$pydep" >/dev/null)
+    sed -i "s/'openssl-3'/'openssl'/" "$pybuild/$pydep/PKGBUILD"
+    (cd "$pybuild/$pydep" && makepkg -si --asdeps --needed --noconfirm)
+    rm -rf "$pybuild"
+  else
+    yay -S --needed --noconfirm --asdeps "$pydep"
+  fi
+fi
 fi
 
 echo "== 3. xtool (built from source) and rcodesign (aarch64 and x86_64 releases) =="
