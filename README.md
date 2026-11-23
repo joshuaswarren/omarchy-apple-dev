@@ -64,9 +64,8 @@ What has run on an iPhone and what only builds (no-Xcode mode):
 ## Requirements
 
 - Omarchy or another Arch-based Linux on Apple Silicon or x86_64. Other
-  distributions: Ubuntu 24.04 and Fedora 44 have verified runs, Fedora 45 a
-  verified install (no device run yet), NixOS a reported one. See
-  [docs/DISTROS.md](docs/DISTROS.md).
+  distributions: Ubuntu 24.04, Fedora 44 and Fedora 45 have verified runs,
+  NixOS a reported one. See [docs/DISTROS.md](docs/DISTROS.md).
 - An iPhone and a USB data cable.
 - A free Apple ID for **one download from Apple**: the `Xcode.xip` from
   developer.apple.com (full mode). The download works from any OS; no Mac, no
