@@ -144,9 +144,19 @@ python3 "$here/tools/gen-shell-package.py" "$app" "$shell_pkg" "$MIN_IOS"
 # the app at launch on every older iOS ("Library not loaded"). Xcode
 # weak-links such frameworks; the cross linker cannot be asked to (an
 # explicit -weak_framework trips the framework's allowed-clients tbd
-# rule), so the load command is rewritten after the link. Env-overridable
-# for apps that import other newer-than-MIN_IOS system frameworks.
-WEAK_FRAMEWORKS=${WEAK_FRAMEWORKS:-SwiftUICore}
+# rule), so the load command is rewritten after the link — and every
+# chained-fixups symbol import bound to the framework is downgraded to a
+# weak import alongside it: a symbol still bound STRONGLY into the missing
+# framework aborts dyld at launch even when the load command is weak.
+# Env-overridable for apps that import other newer-than-MIN_IOS system
+# frameworks. Only an UNSET variable takes the default: an explicitly
+# empty WEAK_FRAMEWORKS disables the load-command rewrite (while
+# WEAK_IMPORTS, if set, still applies to imports alone).
+WEAK_FRAMEWORKS=${WEAK_FRAMEWORKS-SwiftUICore}
+# WEAK_IMPORTS names frameworks (spaces or commas) whose symbol imports
+# alone are made weak, without touching their load commands — in the MAIN
+# executable (Runner) only; app extensions keep their real imports.
+WEAK_IMPORTS=${WEAK_IMPORTS:-}
 # Native-asset frameworks (flutter_soloud, objective_c, sqlite3, ...) are
 # dlopen'ed by the Dart runtime only on demand, but plugins whose SwiftPM
 # package compiles with -undefined dynamic_lookup against the asset's exports
@@ -323,8 +333,28 @@ fi
 # see the vanilla load commands (distro llvm-strip rejects an unfamiliar
 # LC_LOAD_WEAK_DYLIB), and nothing after this point parses the binaries
 # except signing, which treats both commands identically.
+# Normalize WEAK_IMPORTS (spaces or commas) into the tool's comma-separated
+# --weak-imports value; passed only when non-empty.
+weak_imports=()
+if [ -n "${WEAK_IMPORTS:-}" ]; then
+  IFS=', ' read -r -a weak_import_list <<<"$WEAK_IMPORTS"
+  for n in "${weak_import_list[@]}"; do
+    if [ -n "$n" ]; then weak_imports+=("$n"); fi
+  done
+fi
+weak_import_args=()
+if [ "${#weak_imports[@]}" -gt 0 ]; then
+  weak_import_args=(--weak-imports "$(IFS=,; printf '%s' "${weak_imports[*]}")")
+fi
+# Runner gets both lists; with only WEAK_IMPORTS set the tool runs
+# without positional frameworks and downgrades imports alone. App
+# extensions (below) never receive WEAK_IMPORTS: they keep their real
+# imports and only get the load-command rewrite from WEAK_FRAMEWORKS.
+if [ -n "${WEAK_FRAMEWORKS:-}" ] || [ "${#weak_imports[@]}" -gt 0 ]; then
+  python3 "$here/tools/weaklink.py" "$bundle/Runner" \
+    ${weak_import_args+"${weak_import_args[@]}"} $WEAK_FRAMEWORKS
+fi
 if [ -n "${WEAK_FRAMEWORKS:-}" ]; then
-  python3 "$here/tools/weaklink.py" "$bundle/Runner" $WEAK_FRAMEWORKS
   for appex in "$bundle"/PlugIns/*.appex; do
     [ -d "$appex" ] || continue
     python3 "$here/tools/weaklink.py" "$appex/$(basename "${appex%.appex}")" $WEAK_FRAMEWORKS
