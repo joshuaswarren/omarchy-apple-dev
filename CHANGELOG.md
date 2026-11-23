@@ -27,6 +27,19 @@
   copy mode, killed-build leftovers, and 8 concurrent runs with and without `flock`.
   Receipt: `receipts/2026-11-23-device-lldb-expressions.md`.
 
+### Fedora 45 install notes: libxml2 2.13 and an LLD `ld`
+
+- `docs/DISTROS.md` gains a Fedora 45 (aarch64, Asahi) section: a full-mode
+  install run inside a distrobox, so the host gets no build packages. It
+  covers two Fedora 45 problems that stop any swift.org UBI 9 toolchain. The
+  toolchain's `swift-build` and LLDB need `libxml2.so.2`, which Fedora's
+  `libxml2_2.13` package provides. SwiftBuild cannot read binutils 2.47's
+  `GNU ld version 2.47.20260726`, so every `swift build` fails with
+  ``Could not parse output of `/usr/sbin/ld -version_details` as JSON``.
+  Making Fedora's `ld.lld` the `ld` alternative fixes it, and `.build/out`
+  must be deleted after a failed run because SwiftBuild caches the result.
+  Receipt: `receipts/2026-11-23-fedora-45-asahi-distrobox.md`.
+
 ## v0.4.7 — 2026-11-24
 
 ### Device builds carry the real SDK version
