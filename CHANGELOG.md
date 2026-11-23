@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### weaklink downgrades the symbol imports of weak-linked frameworks
+
+- `flutter/tools/weaklink.py` no longer stops at the load command. A weak `LC_LOAD_WEAK_DYLIB` alone did not stop the launch abort: any symbol still bound STRONGLY against the weak-linked framework aborts dyld at launch on every system where the framework is missing (field report for #116: four released builds of a Flutter app kept aborting on iOS 17 and older; one strong bind into SwiftUICore remained, the `_$ss5NeverO7SwiftUI4ViewACWP` `Never: View` witness-table accessor, confirmed with two independent parsers of the chained-fixups imports table). The v0.4.3 note claiming the Sentry 9.x link closure binds no SwiftUICore imports was verified against one binary once and does not hold in general. The tool now reads the `LC_DYLD_CHAINED_FIXUPS` imports table and downgrades every strong import bound to a weak-linked framework to a weak import; the app must not rely on that framework's functionality on systems where it is absent.
+- New `--weak-imports F1,F2,...` option names frameworks whose imports alone are downgraded, without touching their load commands; `flutter/build.sh` takes the corresponding `WEAK_IMPORTS` env (spaces or commas, default empty) and applies it to the main executable (Runner) only — app extensions keep their real imports. Classic dyld bind opcodes (`LC_DYLD_INFO`/`LC_DYLD_INFO_ONLY` with a non-zero bind table and no chained fixups) are refused with a non-zero exit instead of leaving imports unchecked, and malformed chained-fixups blobs (blob or imports table out of bounds, unknown imports format or fixups version) are rejected before any write, so a refused binary stays byte-identical.
+- `tests/test_weaklink.py` grows from two to ten real-CLI tests: the weak bit of all three chained-import formats, a second run changing no bytes, `--weak-imports` leaving the load command strong, the classic-bind refusal, five malformed-input cases, a two-slice fat binary, and the old load-command-only output when no import matches.
+
 ### Installer: python312 builds again when `openssl-3` does not exist
 
 - The AUR `python312` (3.12.16-2), which Swift 6.4's LLDB links, depends on
