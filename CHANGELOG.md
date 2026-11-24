@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.4.8 - 2026-11-24
 
 ### `p`, `po` and `expression` work in `device-run.sh --lldb`
 
