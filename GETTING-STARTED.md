@@ -76,6 +76,9 @@ whole project; cross-file results appear when that ends.
    directory. It installs and starts the app. With `--lldb` it installs the
    app, mounts the developer disk image, copies the phone's Swift runtime once
    (a few GB) and attaches LLDB, so `frame variable` shows Swift values.
+   `p`, `po` and `expression` evaluate Swift too: LLDB runs with the iOS
+   SDK's Swift resource directory (`tools/lldb-ios-shadow.sh`; receipt
+   `receipts/2026-11-23-device-lldb-expressions.md`).
    `LLDB_CMDS` (one command per line) scripts the session, and
    `LLDB_PYTHONHOME` names a CPython 3.12 when the system has none
    (receipt `receipts/2026-10-07-device-run-lldb.md`).
