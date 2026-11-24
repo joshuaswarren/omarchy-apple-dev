@@ -39,10 +39,18 @@ ios_sdk="$bundle/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.s
 [ -x "$real/bin/lldb" ] || { echo "lldb-ios-shadow: no lldb in $real/bin" >&2; exit 1; }
 lib=$(cd "$real/lib" && ls liblldb.so.*.*.* 2>/dev/null | head -n1) || true
 [ -n "$lib" ] || { echo "lldb-ios-shadow: no liblldb.so.X.Y.Z in $real/lib" >&2; exit 1; }
-# LLDB's Python package (site-packages or dist-packages), relative to the toolchain's usr.
-pkg=$(cd "$real" && find . -maxdepth 6 -path ./lib/swift -prune -o \
-  -path '*-packages/lldb/__init__.py' -print 2>/dev/null | head -n1) || true
-pkg=${pkg#./}; pkg=${pkg%/__init__.py}
+# LLDB's Python package (site-packages or dist-packages), relative to the toolchain's usr: the
+# one whose _lldb*.so is this liblldb. None found: no mirror (Python then maps the toolchain's
+# liblldb, which only matters for a copy).
+pkg=
+real_lib=$(readlink -f "$real/lib/$lib")
+while IFS= read -r init; do
+  d=${init%/__init__.py}
+  for so in "$real/$d"/_lldb*.so; do
+    if [ "$(readlink -f "$so")" = "$real_lib" ]; then pkg=$d; break 2; fi
+  done
+done < <(cd "$real" && find . -maxdepth 6 -path ./lib/swift -prune -o \
+  -path '*-packages/lldb/__init__.py' -print 2>/dev/null | sed 's|^\./||' | sort)
 
 cache="${XDG_CACHE_HOME:-$HOME/.cache}/omarchy-apple-dev/lldb-ios"
 key=$(printf '%s' "$real" | sha256sum | cut -c1-12)
@@ -62,6 +70,8 @@ if command -v flock >/dev/null; then
   exec 9>"$cache/.lock"
   flock 9
   current && { emit; exit 0; }
+  # Holding the lock, no other build is running: clear what killed builds left behind.
+  rm -rf -- "$cache"/.build.* "$cache"/.old.*
 fi
 
 tmp=$(mktemp -d "$cache/.build.XXXXXX")
@@ -121,11 +131,20 @@ done
 
 printf '%s\n' "$stamp" >"$tmp/.stamp"
 # Replace the old tree. An lldb still running from it keeps its mapped files.
+# Without flock another run may have replaced or moved it meanwhile: if this rename loses,
+# use the winner's tree when it is current.
 if [ -e "$shadow" ]; then
   old=$(mktemp -d "$cache/.old.XXXXXX")
-  mv -T "$shadow" "$old/tree"
+  mv -T "$shadow" "$old/tree" 2>/dev/null || true
   rm -rf -- "$old"
 fi
-mv -T "$tmp" "$shadow"
+if ! mv -T "$tmp" "$shadow" 2>/dev/null; then
+  for _ in $(seq 50); do
+    current && { emit; exit 0; }
+    sleep 0.1
+  done
+  echo "lldb-ios-shadow: could not put the tree in place at $shadow" >&2
+  exit 1
+fi
 trap - EXIT
 emit

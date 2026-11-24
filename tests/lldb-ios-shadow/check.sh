@@ -31,6 +31,10 @@ echo clang >"$tc/lib/libclang.so.21.0.0"
 touch "$tc/lib/swift/CoreFoundation/module.modulemap" "$tc/$py/lldb/__init__.py" "$tc/$py/six.py"
 # As in the swift.org toolchain: _lldb.so is a relative link to usr/lib/liblldb.so
 ln -s ../../../../../lib/liblldb.so "$tc/$py/lldb/_lldb.cpython-313-aarch64-linux-gnu.so"
+# A second lldb package that sorts first but belongs to another liblldb: not the one to mirror.
+mkdir -p "$tc/lib/python3/dist-packages/lldb"
+touch "$tc/lib/python3/dist-packages/lldb/__init__.py" "$tc/lib/other-liblldb.so"
+ln -s ../../../other-liblldb.so "$tc/lib/python3/dist-packages/lldb/_lldb.so"
 # swift on PATH is a symlink, as mise and the AUR package install it
 mkdir -p "$w/path"
 ln -s "$tc/bin/swift" "$w/path/swift"
@@ -118,6 +122,33 @@ wait
 rcs=$(cat "$w"/par.?.rc | sort -u | tr '\n' ' ')
 check "8 concurrent runs exit 0" test "$rcs" = "0 "
 check "8 concurrent runs print the same" test "$(cat "$w"/par.? | sort -u | wc -l)" = 2
+
+# Leftovers of killed builds are cleared by the next build (which holds the lock).
+c=$w/cache/omarchy-apple-dev/lldb-ios
+mkdir -p "$c/.build.dead1/usr" "$c/.old.dead2/tree"
+rm "$c"/*/.stamp
+run >/dev/null || bad "run with leftovers" "exit $?"
+check "killed-build leftovers removed" test -z "$(find "$c" -maxdepth 1 -name '.build.*' -o -maxdepth 1 -name '.old.*')"
+
+# Without flock, concurrent runs still succeed (the loser of the rename uses the winner's tree).
+nf=$w/noflock
+mkdir -p "$nf"
+for t in bash env dirname readlink ls head find sed sort sha256sum cut stat cat mkdir mktemp ln \
+  cp rm mv seq sleep; do
+  ln -s "$(command -v "$t")" "$nf/$t"
+done
+ln -s "$tc/bin/swift" "$nf/swift"
+for round in cold rebuild; do
+  if [ "$round" = cold ]; then rm -rf "$w/cache"; else rm "$c"/*/.stamp; fi
+  rm -f "$w"/nf.*
+  for i in 1 2 3 4 5 6 7 8; do
+    (PATH=$nf XDG_CONFIG_HOME=$cfg XDG_CACHE_HOME=$w/cache HOME=$w/home "$nf/bash" "$script" \
+      >"$w/nf.$i" 2>&1; echo $? >"$w/nf.$i.rc") &
+  done
+  wait
+  check "no flock, $round: 8 concurrent runs exit 0" test "$(cat "$w"/nf.?.rc | sort -u | tr '\n' ' ')" = "0 "
+  check "no flock, $round: tree current afterwards" test -s "$(dirname "$s")/.stamp"
+done
 
 rm -rf "$sdk"
 if msg=$(run 2>&1); then

@@ -22,9 +22,9 @@
   iPhoneOS SDK. On an iPhone 15 with iOS 27.2.1: `p launches * 2` → `84`, `po greeting`,
   `expression -- greeting.uppercased()`. `LLDB_PLAIN=1` restores the old behaviour; if the
   script fails, a note is printed and the toolchain's lldb is used. `--sudo` is unchanged.
-- `tests/lldb-ios-shadow/check.sh` (in `tests/run.sh`, 36 checks) covers the tree with stub files:
-  layout, the Python link, reuse, rebuilds (toolchain, SDK, lost stamp), copy mode and 8
-  concurrent runs.
+- `tests/lldb-ios-shadow/check.sh` (in `tests/run.sh`, 41 checks) covers the tree with stub files:
+  layout, the Python link (with a decoy package), reuse, rebuilds (toolchain, SDK, lost stamp),
+  copy mode, killed-build leftovers, and 8 concurrent runs with and without `flock`.
   Receipt: `receipts/2026-11-23-device-lldb-expressions.md`.
 
 ## v0.4.7 — 2026-11-24
