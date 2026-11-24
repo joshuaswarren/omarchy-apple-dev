@@ -191,6 +191,87 @@ See [`receipts/2026-10-20-fedora-44.md`](../receipts/2026-10-20-fedora-44.md)
 for the exact dependency/setup commands, observed warnings, successful
 provisioning/signing/install log, and outstanding limitations.
 
+## Fedora 45 (aarch64, Asahi) — full install in a distrobox
+
+Verified 2026-11-23 on Fedora Linux Asahi Remix 45 (kernel
+`7.3.4-401.asahi.fc45.aarch64+16k`, 16K pages): `install-toolchain.sh --mode
+full` ran to `Done.` with Swift 6.4.1 for steps 1-4 and 6.4.2 for the SDK
+step (swift.org UBI 9 builds, installed with mise) and Xcode 27.2 (27B52).
+It built xtool, registered the iOS, simulator and macOS 27.2 SDKs, and
+installed `actool`, `xcstringstool`, `momc`, `ibtool` and
+OpenAppleMacrosServer. Then, all inside the container: `xtool auth` with a
+free Apple ID, `xtool new` and `xtool dev build` of the SwiftUI template, and
+`device-run.sh`, which installed it on an iPhone 15 (iOS 27.2.1) over USB. The
+app launched and showed its text. LLDB was not run.
+
+The build dependencies live in a distrobox, so the host gets no `-devel`
+packages. distrobox shares `$HOME`, so everything the installer writes
+(`~/.local/bin/xtool`, `rcodesign`, `ipsw`, `~/pymobile3-venv`, the SDK) lands
+in your home directory. The tools run on the host too, because the container
+and the host are the same Fedora release.
+
+```sh
+distrobox create --name apple-dev --image registry.fedoraproject.org/fedora-toolbox:45
+distrobox enter apple-dev -- sudo dnf install -y --setopt=install_weak_deps=False \
+  gcc gcc-c++ make cmake git binutils file pkgconf-pkg-config \
+  libimobiledevice-devel libimobiledevice-utils usbmuxd openssl-devel \
+  libheif-tools poppler-utils python3 python3-devel python3-pip \
+  zip unzip rsync xz-devel bzip2-devel zlib-devel libzstd-devel libxml2-devel \
+  libcurl-devel libedit-devel fuse3-devel z3-devel ncurses-libs llvm \
+  autoconf automake libtool libxml2_2.13 lld usbutils
+distrobox enter apple-dev -- sudo alternatives --install /usr/bin/ld ld /usr/bin/ld.lld 100
+# from your checkout (distrobox keeps the current directory):
+distrobox enter apple-dev -- env XCODE_XIP="$HOME/Downloads/Xcode_27.2.xip" ./install-toolchain.sh --mode full
+```
+
+Put a swift.org toolchain on PATH before running the installer (mise's `swift`
+plugin installs the UBI 9 build). Two Fedora 45 problems break it otherwise,
+on the host and in a container alike:
+
+- **`libxml2_2.13`.** The UBI 9 toolchain's `swift-build` and `liblldb.so` link
+  `libxml2.so.2`. Fedora 45 ships libxml2 2.15 (`libxml2.so.16`), so the xtool
+  build stops with `swift-build: error while loading shared libraries:
+  libxml2.so.2`. Fedora's `libxml2_2.13` package installs the real 2.13
+  library beside it, which is cleaner than a soname alias.
+- **`ld` must be an LLD.** In Swift 6.4, `swift build` uses SwiftBuild, which
+  identifies the linker by running `/usr/sbin/ld -version_details` and, when
+  that fails, `ld -v`. It accepts only Apple's JSON, `LLD <version>`, `GNU ld
+  version <X.Y>-…` or `GNU ld (GNU Binutils…) <X.Y>`. binutils 2.47 prints
+  `GNU ld version 2.47.20260726`, with no hyphen, so every build stops with
+  ``Could not parse output of `/usr/sbin/ld -version_details` as JSON: GNU ld
+  version 2.47.20260726``. Making Fedora's `ld.lld` the `ld` alternative fixes
+  it (`LLD 23.1.5 (compatible with GNU linkers)` matches). The probe always
+  uses `/usr/sbin/ld`. Putting another `ld` first on PATH or passing
+  `-Xswiftc -use-ld=lld` does not change what it runs. `--build-system native`
+  avoids the probe but is deprecated.
+- After a failed probe, delete the package's `.build/out` before retrying.
+  SwiftBuild keeps the failed result in its cached build description, so the
+  same error comes back even after `ld` is fixed. For the installer's xtool
+  build that directory is
+  `~/.cache/omarchy-apple-dev/xtool-<sha>/.build/out`.
+
+Two more things to know:
+
+- distrobox sets `XDG_CONFIG_HOME=$HOME/.config`, so the installer registers
+  the SDK in `~/.config/swiftpm/swift-sdks`. A host shell without
+  `XDG_CONFIG_HOME` looks in `~/.swiftpm/swift-sdks` and lists no SDK. Run
+  builds inside the container, where `ld` is also fixed, or export the same
+  `XDG_CONFIG_HOME` on the host.
+- The container does not see the host's `usbmuxd` socket, so `idevice_id -l`
+  prints `ERROR: Unable to retrieve device list!` there. distrobox mounts the
+  host root at `/run/host`. Link the socket once (the link survives
+  `distrobox stop`):
+
+  ```sh
+  distrobox enter apple-dev -- sudo ln -sfn /run/host/run/usbmuxd /run/usbmuxd
+  ```
+
+  `usbmuxd` itself stays on the host, where udev starts it when the iPhone is
+  plugged in.
+
+Receipt with the quoted errors and versions:
+[`receipts/2026-11-23-fedora-45-asahi-distrobox.md`](../receipts/2026-11-23-fedora-45-asahi-distrobox.md).
+
 ## Arch-based distributions
 
 Tested (the home target). `install-toolchain.sh` installs `usbmuxd zip
