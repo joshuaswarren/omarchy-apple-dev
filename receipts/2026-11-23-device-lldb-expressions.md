@@ -46,7 +46,8 @@ variable overrides it.
 ## After: the shadow toolchain
 
 `tools/lldb-ios-shadow.sh` builds `~/.cache/omarchy-apple-dev/lldb-ios/<hash>/usr` with `lldb`
-and `liblldb.so.21.0.0` hard-linked from the toolchain and `lib/swift` holding the darwin SDK's
+and `liblldb.so.21.0.0` hard-linked from the toolchain (copied across filesystems), LLDB's Python
+package mirrored with `_lldb.so` pointing at that liblldb, and `lib/swift` holding the darwin SDK's
 `XcodeDefault.xctoolchain/usr/lib/swift` entries (the `swiftResourcesPath` xtool builds the app
 with) plus the toolchain's `linux/` and `host/` (liblldb's RUNPATH). `device-run.sh --lldb` runs
 that lldb and adds `settings set target.sdk-path <iPhoneOS.sdk>` (`SwiftShims` is in the SDK's
@@ -80,6 +81,32 @@ of the running lldb named `~/.cache/omarchy-apple-dev/lldb-ios/<hash>/usr/bin/ll
 `po self` inside that `onAppear` closure reports `cannot find 'self' in scope`: the closure
 never captures `self`, as Swift reports on a Mac too.
 
+## Copy mode
+
+A hard link fails when the cache and the toolchain are on different filesystems (for example
+btrfs subvolumes, or a toolchain under `/usr` with `/home` separate). The script then copies
+`lldb` and liblldb. A copy is a different file from the toolchain's liblldb, so LLDB's Python
+package (whose `_lldb.so` links `../../../../../lib/liblldb.so`) would map the toolchain's
+copy a second time. The script mirrors the package's directories into the shadow and recreates
+that relative link there, so it resolves to the shadow liblldb.
+
+`LLDB_IOS_SHADOW_COPY=1 device-run.sh --lldb`, same breakpoint (stamp `copy 1`, shadow liblldb
+with link count 1):
+
+```
+(lldb) script import os; print("liblldb mapped:", sorted({l.split()[-1] for l in open("/proc/self/maps") if "liblldb" in l}))
+liblldb mapped: ['~/.cache/omarchy-apple-dev/lldb-ios/<hash>/usr/lib/liblldb.so.21.0.0']
+(lldb) p launches * 2
+(Int) 84
+(lldb) po greeting
+Hello from Fedora Asahi
+```
+
+The next plain run rebuilt the tree with hard links (the stamp records the mode). It showed the
+same single mapping (link count 2, the toolchain's inode), `p launches * 2` → `84`, and
+`expression -- greeting.uppercased()` → `"HELLO FROM FEDORA ASAHI"`. No `.build.*` or `.old.*`
+directories were left in the cache.
+
 ## Not run
 
 - `--sudo` (the kernel-tunnel path through `debugserver lldb`): unchanged by this change.
@@ -87,7 +114,7 @@ never captures `self`, as Swift reports on a Mac too.
   toolchain from the `swift` on PATH and needs `bin/lldb` and `lib/liblldb.so.X.Y.Z` there; it
   was not checked that `swift-bin` names liblldb that way. When the script fails,
   `device-run.sh` prints a note and uses the toolchain's lldb as before.
-- A cache and toolchain on different filesystems (the script then copies `lldb` and liblldb
-  instead of hard-linking them).
+- A cache and toolchain on different filesystems for real. Copy mode was run on the device with
+  `LLDB_IOS_SHADOW_COPY=1` instead (section below).
 - `tests/lldb-ios-shadow/check.sh` covers the tree layout, reuse, rebuild after a toolchain
   update and the missing-SDK message with stub files.

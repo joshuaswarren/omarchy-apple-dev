@@ -301,7 +301,7 @@ print(d["ProductVersion"] + " (" + d["BuildVersion"] + ")")' "$info")"
   # LLDB cannot find on its own; tools/lldb-ios-shadow.sh gives it one (see its header).
   # LLDB_PLAIN=1 keeps the toolchain's lldb: frame variable still works, expressions do not.
   if [ -z "${LLDB_PLAIN:-}" ]; then
-    if shadow=$("$(dirname "$0")/tools/lldb-ios-shadow.sh" 2>&1); then
+    if shadow=$("$(dirname "$(readlink -f "$0")")/tools/lldb-ios-shadow.sh" 2>&1); then
       lldb_bin=$(sed -n 1p <<<"$shadow")
       sdk_path=$(sed -n 2p <<<"$shadow")
     else

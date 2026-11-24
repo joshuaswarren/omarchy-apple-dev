@@ -1,25 +1,31 @@
 #!/usr/bin/env bash
 # Prints two lines: an lldb that evaluates Swift expressions (expression, p, po) for an iOS
 # app, and the iPhoneOS.sdk path for `settings set target.sdk-path`. device-run.sh --lldb uses
-# both. Creates or refreshes the shadow toolchain the lldb runs from; safe to re-run.
+# both. Creates or refreshes the shadow toolchain the lldb runs from; safe to re-run, also
+# concurrently.
 #
 # Why: for an iOS target, Linux LLDB looks for an Xcode Swift resource dir, finds none
 # ("Error while searching for SDK: HostInfoError"), and falls back to its own Linux
 # usr/lib/swift. That dir's CoreFoundation module shadows the SDK's, so every Swift expression
 # fails with "missing required module 'SwiftShims'" or "malformed or corrupted precompiled
-# file". LLDB takes the resource dir from <dir of liblldb.so>/swift and offers no setting for
-# it, so the shadow toolchain puts the darwin SDK's resource dir there:
-#   usr/bin/lldb            hard link to the toolchain's lldb (its RUNPATH is $ORIGIN/../lib)
-#   usr/lib/liblldb.so.*    hard link to the toolchain's liblldb. Same inode, so LLDB's Python
-#                           module, which links the real path, does not load a second copy.
+# file". LLDB takes the resource dir from <dir of liblldb.so>/swift, after resolving symlinks,
+# and offers no setting for it. So the shadow toolchain holds a real liblldb file:
+#   usr/bin/lldb            the toolchain's lldb (its RUNPATH is $ORIGIN/../lib)
+#   usr/lib/liblldb.so.*    the toolchain's liblldb
 #   usr/lib/swift/          the entries of the SDK's XcodeDefault.xctoolchain/usr/lib/swift
 #                           (what xtool builds the app against), plus linux/ and host/ from
 #                           the toolchain, which liblldb loads its own libraries from
+#   .../site-packages/lldb/ LLDB's Python package, its _lldb.so re-pointed at the shadow
+#                           liblldb, so Python does not map the toolchain's copy a second time
 #   everything else         symlinks to the toolchain
-# The toolchain is the one the swift on PATH resolves to. The tree lives in
-# ${XDG_CACHE_HOME:-~/.cache}/omarchy-apple-dev/lldb-ios/<hash of the toolchain path>/ and is
-# rebuilt when its hard links no longer match the toolchain (an update replaced the files).
+# lldb and liblldb are hard links when the cache and the toolchain share a filesystem, else
+# copies (about 230 MB; LLDB_IOS_SHADOW_COPY=1 forces copies). The toolchain is the one the
+# swift on PATH resolves to. The tree lives in
+# ${XDG_CACHE_HOME:-~/.cache}/omarchy-apple-dev/lldb-ios/<hash of the toolchain path>/. A stamp
+# written last records what it was built from; any difference (toolchain update, other SDK,
+# interrupted build) rebuilds it in a temp dir that then replaces it.
 set -euo pipefail
+STAMP_VERSION=1
 
 command -v swift >/dev/null || { echo "lldb-ios-shadow: no swift on PATH" >&2; exit 1; }
 real=$(dirname "$(dirname "$(readlink -f "$(command -v swift)")")") # the toolchain's usr
@@ -33,36 +39,93 @@ ios_sdk="$bundle/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.s
 [ -x "$real/bin/lldb" ] || { echo "lldb-ios-shadow: no lldb in $real/bin" >&2; exit 1; }
 lib=$(cd "$real/lib" && ls liblldb.so.*.*.* 2>/dev/null | head -n1) || true
 [ -n "$lib" ] || { echo "lldb-ios-shadow: no liblldb.so.X.Y.Z in $real/lib" >&2; exit 1; }
+# LLDB's Python package (site-packages or dist-packages), relative to the toolchain's usr.
+pkg=$(cd "$real" && find . -maxdepth 6 -path ./lib/swift -prune -o \
+  -path '*-packages/lldb/__init__.py' -print 2>/dev/null | head -n1) || true
+pkg=${pkg#./}; pkg=${pkg%/__init__.py}
 
+cache="${XDG_CACHE_HOME:-$HOME/.cache}/omarchy-apple-dev/lldb-ios"
 key=$(printf '%s' "$real" | sha256sum | cut -c1-12)
-shadow="${XDG_CACHE_HOME:-$HOME/.cache}/omarchy-apple-dev/lldb-ios/$key"
+shadow="$cache/$key"
+stamp=$(printf '%s\n' "version $STAMP_VERSION" "toolchain $real" "resources $darwin_rd" \
+  "python ${pkg:-none}" "copy ${LLDB_IOS_SHADOW_COPY:-0}" \
+  "lldb $(stat -L -c '%s %Y' "$real/bin/lldb")" "$lib $(stat -L -c '%s %Y' "$real/lib/$lib")")
 
-if [ -x "$shadow/usr/bin/lldb" ] && [ "$shadow/usr/bin/lldb" -ef "$real/bin/lldb" ] &&
-  [ "$shadow/usr/lib/$lib" -ef "$real/lib/$lib" ] && [ -e "$shadow/usr/lib/swift/iphoneos" ]; then
-  printf '%s\n%s\n' "$shadow/usr/bin/lldb" "$ios_sdk"
-  exit 0
+current() { [ -f "$shadow/.stamp" ] && [ "$(cat "$shadow/.stamp")" = "$stamp" ]; }
+emit() { printf '%s\n%s\n' "$shadow/usr/bin/lldb" "$ios_sdk"; }
+
+current && { emit; exit 0; }
+
+mkdir -p "$cache"
+# One builder at a time; a waiting run rechecks and reuses what the first one built.
+if command -v flock >/dev/null; then
+  exec 9>"$cache/.lock"
+  flock 9
+  current && { emit; exit 0; }
 fi
 
-rm -rf -- "$shadow"
-mkdir -p "$shadow/usr/bin" "$shadow/usr/lib/swift"
-# A hard link needs the cache and the toolchain on one filesystem. A copy works as well (liblldb
-# is about 230 MB); LLDB's Python module then maps a second copy of liblldb.
-ln "$real/bin/lldb" "$shadow/usr/bin/lldb" 2>/dev/null || cp "$real/bin/lldb" "$shadow/usr/bin/lldb"
-ln "$real/lib/$lib" "$shadow/usr/lib/$lib" 2>/dev/null || cp "$real/lib/$lib" "$shadow/usr/lib/$lib"
+tmp=$(mktemp -d "$cache/.build.XXXXXX")
+trap 'rm -rf -- "$tmp"' EXIT
+u=$tmp/usr
+mkdir -p "$u/bin" "$u/lib/swift"
+place() { # SRC DST: a hard link, or a copy across filesystems (or when forced)
+  if [ "${LLDB_IOS_SHADOW_COPY:-0}" != 1 ] && ln "$1" "$2" 2>/dev/null; then return; fi
+  cp -p "$1" "$2"
+}
+place "$real/bin/lldb" "$u/bin/lldb"
+place "$real/lib/$lib" "$u/lib/$lib"
 mid=${lib%.*} # liblldb.so.21.0.0 -> liblldb.so.21.0 -> liblldb.so, all inside the shadow
-ln -s "$lib" "$shadow/usr/lib/$mid"
-ln -s "$mid" "$shadow/usr/lib/liblldb.so"
+ln -s "$lib" "$u/lib/$mid"
+ln -s "$mid" "$u/lib/liblldb.so"
 for e in "$real"/lib/*; do
   n=${e##*/}
-  case $n in swift | liblldb.so*) ;; *) ln -s "$e" "$shadow/usr/lib/$n" ;; esac
+  case $n in swift | liblldb.so*) ;; *) ln -s "$e" "$u/lib/$n" ;; esac
 done
 for e in "$darwin_rd"/*; do
   n=${e##*/}
-  case $n in host | linux) ;; *) ln -s "$e" "$shadow/usr/lib/swift/$n" ;; esac
+  case $n in host | linux) ;; *) ln -s "$e" "$u/lib/swift/$n" ;; esac
 done
-ln -s "$real/lib/swift/linux" "$shadow/usr/lib/swift/linux"
-ln -s "$real/lib/swift/host" "$shadow/usr/lib/swift/host"
-for n in local share include libexec; do
-  if [ -e "$real/$n" ]; then ln -s "$real/$n" "$shadow/usr/$n"; fi
+ln -s "$real/lib/swift/linux" "$u/lib/swift/linux"
+ln -s "$real/lib/swift/host" "$u/lib/swift/host"
+
+# Everything else at the top of usr links to the toolchain, except the directories on the way
+# to the Python package: those are real directories whose other entries link to the toolchain.
+mirror() { # REL: make $u/REL a directory mirroring $real/REL with symlinks
+  local e n
+  mkdir -p "$u/$1"
+  for e in "$real/$1"/* "$real/$1"/.[!.]*; do
+    [ -e "$e" ] || [ -L "$e" ] || continue
+    n=${e##*/}
+    [ -e "$u/$1/$n" ] || [ -L "$u/$1/$n" ] || ln -s "$e" "$u/$1/$n"
+  done
+}
+if [ -n "$pkg" ]; then
+  path=
+  IFS=/ read -ra parts <<<"$pkg"
+  for part in "${parts[@]}"; do
+    path=${path:+$path/}$part
+    [ -L "$u/$path" ] && rm "$u/$path" # created as a symlink one level up: replace it
+    mirror "$path"
+  done
+  # _lldb*.so links to liblldb by a relative path: recreate it inside the shadow.
+  for so in "$real/$pkg"/_lldb*.so; do
+    [ -L "$so" ] || continue
+    rm -f "$u/$pkg/${so##*/}"
+    ln -s "$(readlink "$so")" "$u/$pkg/${so##*/}"
+  done
+fi
+for e in "$real"/*; do
+  n=${e##*/}
+  [ -e "$u/$n" ] || [ -L "$u/$n" ] || ln -s "$e" "$u/$n"
 done
-printf '%s\n%s\n' "$shadow/usr/bin/lldb" "$ios_sdk"
+
+printf '%s\n' "$stamp" >"$tmp/.stamp"
+# Replace the old tree. An lldb still running from it keeps its mapped files.
+if [ -e "$shadow" ]; then
+  old=$(mktemp -d "$cache/.old.XXXXXX")
+  mv -T "$shadow" "$old/tree"
+  rm -rf -- "$old"
+fi
+mv -T "$tmp" "$shadow"
+trap - EXIT
+emit

@@ -10,15 +10,21 @@
   `malformed or corrupted precompiled file` from the Linux `CoreFoundation` module shadowing the
   SDK's). Only `frame variable` worked.
 - New `tools/lldb-ios-shadow.sh` builds a shadow toolchain in
-  `~/.cache/omarchy-apple-dev/lldb-ios/<hash>/`: `lldb` and `liblldb` hard-linked from the
-  toolchain, with the darwin SDK's `XcodeDefault.xctoolchain/usr/lib/swift` as LLDB's Swift
-  resource dir (it reads it from `<dir of liblldb.so>/swift`) plus the toolchain's `linux/` and
-  `host/`. It is reused while current and rebuilt after a toolchain update.
+  `~/.cache/omarchy-apple-dev/lldb-ios/<hash>/`: `lldb` and `liblldb` from the toolchain (hard
+  links, or copies when the cache is on another filesystem, as with btrfs subvolumes), with the
+  darwin SDK's `XcodeDefault.xctoolchain/usr/lib/swift` as LLDB's Swift resource dir (it reads
+  it from `<dir of liblldb.so>/swift`, symlinks resolved) plus the toolchain's `linux/` and
+  `host/`. LLDB's Python package is mirrored with `_lldb.so` re-pointed at the shadow `liblldb`,
+  so a copy is never mapped twice. A stamp written last (toolchain, SDK, `lldb`/`liblldb` size
+  and mtime) decides reuse; any change, or a build that stopped early, rebuilds it in a temp
+  dir that then replaces it, under `flock` so concurrent runs wait and reuse.
 - `device-run.sh --lldb` (userspace tunnel path) runs that lldb and sets `target.sdk-path` to the
   iPhoneOS SDK. On an iPhone 15 with iOS 27.2.1: `p launches * 2` → `84`, `po greeting`,
   `expression -- greeting.uppercased()`. `LLDB_PLAIN=1` restores the old behaviour; if the
   script fails, a note is printed and the toolchain's lldb is used. `--sudo` is unchanged.
-- `tests/lldb-ios-shadow/check.sh` (in `tests/run.sh`) checks the tree with stub files.
+- `tests/lldb-ios-shadow/check.sh` (in `tests/run.sh`, 36 checks) covers the tree with stub files:
+  layout, the Python link, reuse, rebuilds (toolchain, SDK, lost stamp), copy mode and 8
+  concurrent runs.
   Receipt: `receipts/2026-11-23-device-lldb-expressions.md`.
 
 ## v0.4.7 — 2026-11-24
