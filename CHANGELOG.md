@@ -279,7 +279,7 @@
 
 ### App icon set and storyboards per configuration
 
-- `flutter/build.sh` passed `--app-icon AppIcon` to actool whatever the configuration. It now passes the configuration's `ASSETCATALOG_COMPILER_APPICON_NAME`, expanded (flutter_flavorizr writes `$(ASSET_PREFIX)AppIcon`, one set per flavor). A set the name points at that is not in `ios/Runner/Assets.xcassets` stops the build. A set that lists several sizes builds, with a warning: App Store processing hung on such a set with no error (FINDINGS.md item 68). Flutter's template set lists every size, so the stock template now prints that warning. An empty name builds with no icon, as in Xcode, with a warning.
+- `flutter/build.sh` passed `--app-icon AppIcon` to actool whatever the configuration. It now passes the configuration's `ASSETCATALOG_COMPILER_APPICON_NAME`, expanded (flutter_flavorizr writes `$(ASSET_PREFIX)AppIcon`, one set per flavor). A set the name points at that is not in `ios/Runner/Assets.xcassets` stops the build. A set that lists several sizes builds, with a warning: App Store processing hung on such a set with no error. Flutter's template set lists every size, so the stock template now prints that warning. An empty name builds with no icon, as in Xcode, with a warning.
 - Storyboards were the `ios/Runner/Base.lproj/*.storyboard` files. They are now the ones the Runner target's Copy Bundle Resources phase lists (`xcode_settings.py --storyboards`, through `tools/xcodeproj2xtool.py`'s `phase_files`), so a per-flavor launch screen outside `Base.lproj` (flutter_native_splash writes one) is compiled. As in Xcode, a localized storyboard is compiled inside its `X.lproj` and lands there, and one that is not localized lands at the bundle root. Compiling inside `X.lproj` makes the Linux ibtool write a storyboard's strings as localizable, as Apple's does; Flutter's two template storyboards come out byte for byte as before.
 - When `Info.plist`'s `UILaunchStoryboardName` (after expansion, so per configuration) names no compiled storyboard, the build stops instead of shipping an app that launches to a black screen.
 - `tests/flutter-assets/run.sh` runs the three blocks from `build.sh` with the real `xcode_settings.py` and `tools/ibtool` on the stock and flavored fixtures, with four mutants; row 5 compares the stock storyboards with what the old glob built. The fixtures gained the template's storyboards, `Info.plist` and icon set manifests (no PNGs). Run on macOS and in a Debian trixie container (`tests/run.sh`); not run in a full build, and actool was not run on a per-flavor set.
@@ -327,7 +327,7 @@
 
 ### Documentation
 
-- The README, `GETTING-STARTED.md`, `FINDINGS.md` and the guides under `docs/` are refreshed (#83).
+- The README, `GETTING-STARTED.md`, and the guides under `docs/` are refreshed (#83).
 
 ## v0.4.2
 
@@ -418,7 +418,7 @@
 
 ### Findings
 
-- FINDINGS.md gains an entry on linking a Rust static library into an xtool app. The archive holds C members that duplicate symbols in `libclang_rt.ios.a`, and `ld64.lld` rejects the duplicates. The entry gives an `llvm-ar` and `llvm-nm` filter that deletes a member only when every symbol it defines is also defined in `libclang_rt.ios.a`. Reported by a user, not reproduced here. The filter was checked on scratch archives only.
+- When linking a Rust static library into an xtool app, `ld64.lld` rejects duplicate symbols defined by C members in the archive and by `libclang_rt.ios.a`. An `llvm-ar` and `llvm-nm` filter can delete a member only when every symbol it defines is also defined in `libclang_rt.ios.a`. A user reported the issue; the filter was checked on scratch archives only.
 
 ### Venv repair
 
