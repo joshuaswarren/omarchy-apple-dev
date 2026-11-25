@@ -49,6 +49,13 @@ class CompileStoryboardInner(unittest.TestCase):
                       f"{path}: device {{'id': 'retina6_1', 'orientation': 'landscape', "
                       "'appearance': 'light'} unsupported", err)
 
+    def test_retina6_12_device_supported(self):
+        xml = LAUNCH.read_text().replace(
+            '<device id="retina6_1" orientation="portrait"',
+            '<device id="retina6_12" orientation="portrait"')
+        _, rc, err = compile_variant(xml)
+        self.assertEqual(rc, 0, err)
+
     def test_no_scenes(self):
         xml = LAUNCH.read_text()
         start = xml.index("<scenes>") + len("<scenes>")
