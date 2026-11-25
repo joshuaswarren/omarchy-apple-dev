@@ -4188,8 +4188,8 @@ def _scroll_common(b, o, el, where, delegate_first=False):
 
 
 DEVICE_SIZES = {"retina4": (320, 568), "retina4_0": (320, 480), "retina4_7": (375, 667),
-                "retina5_5": (414, 736), "retina5_9": (320, 568), "retina6_1": (414, 896), "retina6_3": (393, 852),
-                "retina6_5": (414, 896)}
+                "retina5_5": (414, 736), "retina5_9": (320, 568), "retina6_1": (414, 896),
+                "retina6_3": (393, 852), "retina6_5": (414, 896), "retina6_12": (393, 852)}
 
 
 def _scroll_view_base(b, o, el, where, resources, device=None):
