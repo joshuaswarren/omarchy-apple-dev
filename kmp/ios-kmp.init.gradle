@@ -53,9 +53,17 @@ allprojects { project ->
         def compile = framework.compilation.compileTaskProvider
         def dependencies = framework.compilation.compileDependencyFiles
         def exported = project.configurations.getByName(framework.exportConfigurationName)
-        def resourcesTask = project.tasks.findByName("assemble${targetName.capitalize()}MainResources")
+        // <target>AggregateResources also collects the Compose resources of the
+        // modules and libraries the project depends on; assemble<Target>MainResources
+        // only has the project's own (kept for a plugin without the former).
+        def resourcesTask = project.tasks.findByName("${targetName}AggregateResources")
         def resources = project.layout.buildDirectory
-            .dir("generated/compose/resourceGenerator/assembledResources/${targetName}Main").get().asFile
+            .dir("kotlin-multiplatform-resources/aggregated-resources/${targetName}").get().asFile
+        if (resourcesTask == null) {
+            resourcesTask = project.tasks.findByName("assemble${targetName.capitalize()}MainResources")
+            resources = project.layout.buildDirectory
+                .dir("generated/compose/resourceGenerator/assembledResources/${targetName}Main").get().asFile
+        }
 
         def version = project.findProperty('kotlin.native.version')
         if (version == null) {
