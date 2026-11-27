@@ -187,6 +187,7 @@ class IdentityTests(unittest.TestCase):
             call=call, certificate=certificate, install_all_bundles=install,
             bundles=lambda app: [(app, i) for i in ("com.example.app", "com.example.app.widget", "com.example.app.share")],
             ensure_app_groups=lambda idents: set(),
+            ensure_requested_capabilities=lambda ident: False,
             profile=lambda ident, cert_id, force_create=False: self.own.append(ident) or f"own:{ident}".encode(),
             profile_payload=lambda prov: self.payloads.get(prov, payload()))
 
