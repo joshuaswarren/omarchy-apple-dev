@@ -169,3 +169,26 @@ laptop (i7-8650U).
   when the two differ.
 - A Flutter upgrade needs `flutter/setup.sh` again: the snapshot format is
   tied to the exact Dart revision.
+
+## Transitive packages that gate on `#if canImport(Darwin)`
+
+Some Swift packages (Mapbox's turf-swift, for example) select their official iOS
+binary target only under `#if canImport(Darwin)`. SwiftPM evaluates that on the
+Linux host even when the build targets iOS, so the package picks its Linux
+branch and the iOS build of its sources fails against the iOS SDK.
+
+The supported way out is an editable copy at the pinned revision with the
+Darwin branch kept, then a rebuild (SwiftPM uses the package's official
+binary and checksum):
+
+```bash
+cd build/ios-linux/shell-package
+swift package resolve                       # pins Package.resolved
+swift package edit turf-swift               # take an editable copy
+# in the editable copy keep the Darwin branch of Package.swift unchanged
+mv .build/.../Turf.swiftmodule /tmp/        # move stale native products aside
+cd - && bash flutter/build.sh .             # rebuild
+```
+
+`build.sh` detects this failure mode and prints the hint; the editable copy
+survives until `swift package unedit`.

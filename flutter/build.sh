@@ -176,7 +176,18 @@ fi
   "${natargs[@]+"${natargs[@]}"}" \
   -Xlinker -rpath -Xlinker @executable_path/Frameworks \
   -Xlinker -platform_version -Xlinker ios -Xlinker "$MIN_IOS" -Xlinker "$sdk_version") \
-  >"$out/shell-build.log" 2>&1 || { grep -E 'error' "$out/shell-build.log" | head -n 40 >&2; exit 1; }
+  >"$out/shell-build.log" 2>&1 || {
+    # A transitive package that gates its target on `#if canImport(Darwin)` picks
+    # its Linux branch on this host even though the build targets iOS (its source
+    # then fails against the iOS SDK). The supported way out: resolve, take an
+    # editable copy at the pinned revision with the Darwin branch kept, move the
+    # stale native products aside, and rebuild - SwiftPM then uses the package's
+    # official binary. See README, "Transitive packages that gate on canImport".
+    grep -qE "was built for platform|targets? .*Linux|canImport" "$out/shell-build.log" &&
+      echo "a transitive package likely picked its Linux manifest on this host; see README, \"Transitive packages that gate on canImport\", for the editable-copy override" >&2
+    grep -E 'error' "$out/shell-build.log" | head -n 40 >&2
+    exit 1
+  }
 products=$shell_pkg/.build/out/Products/Release-iphoneos
 
 echo "== 2b. Extensions: the app extensions the Runner embeds (widgets and friends)"
@@ -188,6 +199,10 @@ print(plan["platform"])
 print(" ".join(e["name"] for e in plan["extensions"]))' "$ext_pkg/plan.json")
 ext_min=${ext_plan%%$'\n'*}
 exts=${ext_plan#*$'\n'}
+# a plan with no extensions still leaves the bare newline here; strip all
+# whitespace so the empty case is truly empty (otherwise the ghost appex name
+# from the platform line leaks into the dSYM pass)
+exts=${exts//[[:space:]]/}
 if [ -n "$exts" ]; then
   (cd "$ext_pkg" && swift build --configuration release --build-system swiftbuild \
     --triple "arm64-apple-ios$ext_min" --toolset "$sdkb/toolset-swb.json" \
@@ -220,6 +235,22 @@ compiled=("$stage"/sbc/*/*.storyboardc)
   --link "$bundle" "${compiled[@]}" 2>"$out/ibtool.log" || { cat "$out/ibtool.log" >&2; exit 1; }
 python3 "$here/tools/gen-info-plist.py" "$app/ios/Runner/Info.plist" "$stage/icon.plist" "$bundle/Info.plist" \
   "$BUNDLE_ID" "$BUILD_NAME" "$BUILD_NUMBER" "$MIN_IOS" "$ios_sdk" "$families" "$configuration"
+# The rest of the Runner target's Copy Bundle Resources phase: each file lands in
+# the bundle at its project path, keeping any X.lproj directory so localized
+# files (InfoPlist.strings and friends) sit in their locale directory as Xcode
+# assembles them. Storyboards are compiled above; asset catalogs are handled by
+# actool; Flutter's own asset catalogs are never in this phase.
+resources=$(python3 "$here/tools/xcode_settings.py" "$app/ios" --resources)
+while IFS= read -r rel; do
+  [ -n "$rel" ] || continue
+  case $rel in
+    *.storyboard | *.xcassets) continue ;;
+  esac
+  src="$app/ios/$rel"
+  [ -f "$src" ] || continue
+  mkdir -p "$bundle/$(dirname "$rel")"
+  cp "$src" "$bundle/$rel"
+done <<<"$resources"
 # The launch screen Info.plist names must be one of them, or the app launches
 # to a black screen.
 launch=$(python3 -c 'import plistlib, sys
