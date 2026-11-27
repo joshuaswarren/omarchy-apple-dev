@@ -104,6 +104,14 @@ def storyboards(ios_dir):
             if path.lower().endswith(".storyboard")]
 
 
+def resources(ios_dir):
+    """Every file the Runner target's Copy Bundle Resources phase lists, storyboards
+    and asset catalogs included (the caller decides what to compile vs copy)."""
+    gen = xcodeproj2xtool.Generator(os.path.join(ios_dir, "Runner.xcodeproj"), "Runner")
+    _oid, target = gen.pick_target()
+    return [path for _ref, path in gen.phase_files(target, "PBXResourcesBuildPhase")]
+
+
 def find_target(gen, target_name):
     """A native target by name. Unlike Generator.pick_target, which only looks
     at application targets, this also finds extension and test targets, whose
@@ -166,6 +174,9 @@ if __name__ == "__main__":
                  " | <ios dir> --storyboards")
     if sys.argv[2] == "--storyboards":
         print("\n".join(storyboards(sys.argv[1])))
+        sys.exit()
+    if sys.argv[2] == "--resources":
+        print("\n".join(resources(sys.argv[1])))
         sys.exit()
     if sys.argv[2] == "--flavor":
         print("\n".join(flavor_configuration(sys.argv[1], sys.argv[3])))
