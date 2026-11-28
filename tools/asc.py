@@ -517,6 +517,44 @@ def ensure_app_groups(identifiers):
     return attached
 
 
+
+def ensure_requested_capabilities(ident):
+    """Enable on the app's bundle id the capabilities its entitlements (ASC_ENTITLEMENTS_PATH) request:
+    push, Sign in with Apple and Associated Domains, as Xcode's automatic signing does on the first
+    build. Already enabled ones are left as they are. Returns True when one was enabled now, so the
+    caller re-creates the profile to carry the new grant. An API refusal stops here: signing without
+    the grant would fail later anyway."""
+    requested = requested_capabilities()
+    wanted = []
+    if APS_KEY in requested:
+        wanted.append(("PUSH_NOTIFICATIONS", None))
+    if SIWA_KEY in requested:
+        # The API needs the consent mode the developer portal defaults to for a new App ID.
+        wanted.append(("APPLE_ID_AUTH", [{"key": "APPLE_ID_AUTH_APP_CONSENT",
+                                          "options": [{"key": "PRIMARY_APP_CONSENT"}]}]))
+    if requested_associated_domains():
+        wanted.append(("ASSOCIATED_DOMAINS", None))
+    if not wanted:
+        return False
+    bid = bundle_id(ident)
+    have = {c.get("attributes", {}).get("capabilityType")
+            for c in call("GET", f"/v1/bundleIds/{bid}/bundleIdCapabilities")["data"]}
+    enabled = False
+    for capability, settings in wanted:
+        if capability in have:
+            continue
+        attributes = {"capabilityType": capability}
+        if settings:
+            attributes["settings"] = settings
+        call("POST", "/v1/bundleIdCapabilities", {"data": {
+            "type": "bundleIdCapabilities",
+            "attributes": attributes,
+            "relationships": {"bundleId": rel("bundleIds", bid)},
+        }})
+        print(f"enabled {capability} for {ident} (requested by the app's entitlements)")
+        enabled = True
+    return enabled
+
 # -- export options ----------------------------------------------------------
 
 APP_STORE_METHODS = ("app-store-connect", "app-store")  # Xcode 15.3 renamed app-store
@@ -611,6 +649,8 @@ def identity(app_dir, out_dir):
     check_signing_certificate(opts.get("certificate"), cert_der)
     idents = [ident for _, ident in bundles(app_dir)]
     attached = ensure_app_groups(idents)
+    if ensure_requested_capabilities(idents[0]):
+        attached.add(idents[0])
     named = opts.get("profiles", {})
     listed = None
 
