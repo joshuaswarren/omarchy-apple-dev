@@ -765,6 +765,15 @@ def make_test_profile(identifier, key, cert, now):
     }
     if APP_GROUPS:
         entitlements["com.apple.security.application-groups"] = list(APP_GROUPS)
+    # Grant what the app requests, as an App Store profile for a bundle id with those capabilities
+    # does; without it every app with push or Sign in with Apple failed the offline validation.
+    requested = requested_capabilities()
+    if APS_KEY in requested:
+        entitlements[APS_KEY] = "production"
+    if SIWA_KEY in requested:
+        entitlements[SIWA_KEY] = ["Default"]
+    if requested_associated_domains():
+        entitlements["com.apple.developer.associated-domains"] = "*"
     payload = plistlib.dumps({
         "AppIDName": identifier, "ApplicationIdentifierPrefix": [team], "Platform": ["iOS"],
         "CreationDate": now.replace(tzinfo=None), "ExpirationDate": cert.not_valid_after_utc.replace(tzinfo=None),
